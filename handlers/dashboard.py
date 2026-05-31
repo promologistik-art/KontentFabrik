@@ -26,7 +26,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ))
             await session.commit()
     
-    # Показываем сразу дашборд вместо приветствия
     await dashboard(update, context)
 
 
@@ -63,14 +62,9 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
     
     user_id = update.effective_user.id
-    
-    # Всегда перезагружаем реестр перед показом
     await registry.reload()
     
-    # Получаем статистику
     all_stats = await registry.get_all_stats(user_id)
-    
-    text = ""
     
     if all_stats:
         text = "📊 <b>Ваш дашборд</b>\n\n"
@@ -85,16 +79,13 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         workers = registry.get_workers_for_type("tg2tg")
         if workers:
-            # Привязки нет — показываем приветствие
             text = (
                 f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
-                f"Я управляю парсерами контента.\n"
                 f"Выберите, с чем хотите работать:\n\n"
                 f"📡 <b>TG2TG</b> — парсинг Telegram-каналов и постинг в Telegram\n"
                 f"📺 <b>U2TG</b> — парсинг YouTube Shorts (скоро)\n"
                 f"📱 <b>TG2VK</b> — парсинг Telegram и постинг в VK (скоро)\n\n"
-                f"Нажмите кнопку ниже, чтобы перейти в бота и создать привязку.\n"
-                f"Затем нажмите «Статистика» для просмотра дашборда."
+                f"Нажмите кнопку ниже, чтобы перейти в бота и создать привязку."
             )
         else:
             text = "❌ Нет доступных клонов.\n\n📺 U2TG: скоро\n📱 TG2VK: скоро"
@@ -102,7 +93,11 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = await build_main_keyboard(user_id)
     
     if query:
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        try:
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        except Exception as e:
+            if "not modified" not in str(e).lower():
+                logger.error(f"Edit error: {e}")
     else:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
@@ -115,7 +110,6 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отладка"""
     user_id = update.effective_user.id
     await registry.reload()
     
@@ -132,7 +126,6 @@ async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     binding = registry.get_user_binding(user_id)
     text += f"\n<b>Ваша привязка:</b> {binding}"
     
-    # Проверяем статистику
     stats = await registry.get_all_stats(user_id)
     text += f"\n\n<b>Статистика:</b> {stats}"
     

@@ -13,7 +13,6 @@ class WorkerRegistry:
         self._bindings = {}
     
     async def load(self):
-        """Загружает реестр из PostgreSQL"""
         await self._load_workers()
         await self._load_bindings()
         logger.info(f"📋 Loaded {len(self._workers)} workers, {len(self._bindings)} bindings")
@@ -59,7 +58,6 @@ class WorkerRegistry:
         return self._bindings.get(str(head_user_id))
     
     async def get_user_stats(self, head_user_id: int) -> dict | None:
-        """Читает статистику напрямую из таблиц клона в PostgreSQL"""
         binding = self.get_user_binding(head_user_id)
         if not binding:
             return None
@@ -94,7 +92,7 @@ class WorkerRegistry:
                 from datetime import datetime
                 today = datetime.utcnow().strftime("%Y-%m-%d")
                 result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at::date = :today"),
+                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
                     {"uid": worker_user_id, "today": today}
                 )
                 posted_today = result.scalar()
