@@ -1,1 +1,1 @@
-from .dashboard import start, dashboard, refresh
+from .dashboard import start, dashboard, refresh, debug

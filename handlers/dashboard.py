@@ -112,3 +112,25 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Обновлено ✅")
     await registry.reload()
     await dashboard(update, context)
+
+
+async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отладка: показывает состояние registry"""
+    user_id = update.effective_user.id
+    
+    await registry.reload()
+    
+    text = f"🔍 <b>Debug info</b>\n\n"
+    text += f"Ваш ID: {user_id}\n\n"
+    text += f"<b>Workers:</b> {len(registry._workers)}\n"
+    for k, w in registry._workers.items():
+        text += f"  {k}: {w['bot_username']}\n"
+    
+    text += f"\n<b>Bindings:</b> {len(registry._bindings)}\n"
+    for k, b in registry._bindings.items():
+        text += f"  head={b['head_user_id']} → {b['bot_type']}#{b['clone_id']}\n"
+    
+    binding = registry.get_user_binding(user_id)
+    text += f"\n<b>Ваша привязка:</b> {binding}"
+    
+    await update.message.reply_text(text, parse_mode="HTML")
