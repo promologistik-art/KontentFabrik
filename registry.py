@@ -1,14 +1,10 @@
-"""Реестр ботов-исполнителей — через общие файлы в /app/shared"""
-import json
-import os
-import sqlite3
+"""Реестр ботов-исполнителей — PostgreSQL"""
 import logging
-from config import Config
+from sqlalchemy import select, text
+from database import AsyncSessionLocal
+from models import Worker, UserBinding
 
 logger = logging.getLogger(__name__)
-
-WORKERS_FILE = os.path.join(Config.DATA_DIR, "workers.json")
-BINDINGS_FILE = os.path.join(Config.DATA_DIR, "bindings.json")
 
 
 class WorkerRegistry:
@@ -16,145 +12,113 @@ class WorkerRegistry:
         self._workers = {}
         self._bindings = {}
     
-    def load(self):
-        """Загружает реестр workers и привязок из общих файлов"""
-        self._load_workers()
-        self._load_bindings()
+    async def load(self):
+        """Загружает реестр из PostgreSQL"""
+        await self._load_workers()
+        await self._load_bindings()
         logger.info(f"📋 Loaded {len(self._workers)} workers, {len(self._bindings)} bindings")
     
-    def _load_workers(self):
-        """Читает workers.json"""
-        if os.path.exists(WORKERS_FILE):
-            try:
-                with open(WORKERS_FILE, "r") as f:
-                    self._workers = json.load(f)
-            except Exception as e:
-                logger.warning(f"Failed to read workers.json: {e}")
-                self._workers = {}
-        else:
-            logger.info("workers.json not found yet — waiting for clones to register")
+    async def _load_workers(self):
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Worker).where(Worker.is_active == True)
+            )
+            self._workers = {}
+            for w in result.scalars().all():
+                key = f"{w.bot_type}:{w.clone_id}"
+                self._workers[key] = {
+                    "bot_type": w.bot_type,
+                    "clone_id": w.clone_id,
+                    "bot_username": w.bot_username,
+                    "db_prefix": w.db_prefix,
+                }
     
-    def _load_bindings(self):
-        """Читает bindings.json"""
-        if os.path.exists(BINDINGS_FILE):
-            try:
-                with open(BINDINGS_FILE, "r") as f:
-                    self._bindings = json.load(f)
-            except Exception as e:
-                logger.warning(f"Failed to read bindings.json: {e}")
-                self._bindings = {}
+    async def _load_bindings(self):
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(UserBinding))
+            self._bindings = {}
+            for b in result.scalars().all():
+                self._bindings[str(b.head_user_id)] = {
+                    "head_user_id": b.head_user_id,
+                    "worker_user_id": b.worker_user_id,
+                    "bot_type": b.bot_type,
+                    "clone_id": b.clone_id,
+                }
     
-    def reload(self):
-        """Перезагружает данные из файлов"""
-        self.load()
+    async def reload(self):
+        await self.load()
     
     def get_least_loaded(self, bot_type: str) -> dict | None:
-        """Выбирает первого доступного worker для bot_type"""
-        candidates = [
-            w for w in self._workers.values()
-            if w.get("bot_type") == bot_type
-        ]
-        if not candidates:
-            return None
-        return candidates[0]
+        candidates = [w for w in self._workers.values() if w["bot_type"] == bot_type]
+        return candidates[0] if candidates else None
     
     def get_workers_for_type(self, bot_type: str) -> list:
-        """Возвращает всех workers для bot_type"""
-        return [
-            w for w in self._workers.values()
-            if w.get("bot_type") == bot_type
-        ]
+        return [w for w in self._workers.values() if w["bot_type"] == bot_type]
     
     def get_user_binding(self, head_user_id: int) -> dict | None:
-        """Возвращает привязку пользователя к клону"""
         return self._bindings.get(str(head_user_id))
     
-    def get_user_stats(self, head_user_id: int) -> dict | None:
-        """Читает статистику напрямую из БД клона"""
+    async def get_user_stats(self, head_user_id: int) -> dict | None:
+        """Читает статистику напрямую из таблиц клона в PostgreSQL"""
         binding = self.get_user_binding(head_user_id)
         if not binding:
             return None
         
-        db_path = binding.get("db_path")
-        if not db_path or not os.path.exists(db_path):
-            logger.warning(f"DB not found: {db_path}")
-            return None
-        
-        worker_user_id = binding.get("worker_user_id")
+        prefix = f"tg{binding['clone_id']}_"
+        worker_user_id = binding["worker_user_id"]
         
         try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            
-            # Проекты
-            cursor.execute(
-                "SELECT COUNT(*) FROM projects WHERE user_id = ? AND is_active = 1",
-                (worker_user_id,)
-            )
-            projects = cursor.fetchone()[0]
-            
-            # Источники
-            cursor.execute(
-                """SELECT COUNT(*) FROM source_channels 
-                   WHERE project_id IN 
-                   (SELECT id FROM projects WHERE user_id = ? AND is_active = 1)
-                   AND is_active = 1""",
-                (worker_user_id,)
-            )
-            sources = cursor.fetchone()[0]
-            
-            # Опубликовано сегодня
-            from datetime import datetime
-            today = datetime.utcnow().strftime("%Y-%m-%d")
-            cursor.execute(
-                """SELECT COUNT(*) FROM post_queue 
-                   WHERE project_id IN 
-                   (SELECT id FROM projects WHERE user_id = ?)
-                   AND status = 'published' 
-                   AND date(published_at) = ?""",
-                (worker_user_id, today)
-            )
-            posted_today = cursor.fetchone()[0]
-            
-            # В очереди
-            cursor.execute(
-                """SELECT COUNT(*) FROM post_queue 
-                   WHERE project_id IN 
-                   (SELECT id FROM projects WHERE user_id = ?)
-                   AND status = 'pending'""",
-                (worker_user_id,)
-            )
-            pending = cursor.fetchone()[0]
-            
-            conn.close()
-            
-            return {
-                "projects": projects,
-                "sources": sources,
-                "posted_today": posted_today,
-                "pending": pending,
-                "bot_type": binding.get("bot_type", "tg2tg"),
-                "clone_id": binding.get("clone_id", 1)
-            }
-            
+            async with AsyncSessionLocal() as session:
+                # Проекты
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {prefix}projects WHERE user_id = :uid AND is_active = true"),
+                    {"uid": worker_user_id}
+                )
+                projects = result.scalar()
+                
+                # Источники
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND is_active = true"),
+                    {"uid": worker_user_id}
+                )
+                sources = result.scalar()
+                
+                # В очереди
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'pending'"),
+                    {"uid": worker_user_id}
+                )
+                pending = result.scalar()
+                
+                # Сегодня
+                from datetime import datetime
+                today = datetime.utcnow().strftime("%Y-%m-%d")
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at::date = :today"),
+                    {"uid": worker_user_id, "today": today}
+                )
+                posted_today = result.scalar()
+                
+                return {
+                    "projects": projects,
+                    "sources": sources,
+                    "pending": pending,
+                    "posted_today": posted_today,
+                    "clone_id": binding["clone_id"],
+                    "bot_type": binding["bot_type"]
+                }
         except Exception as e:
-            logger.error(f"Failed to read stats from {db_path}: {e}")
+            logger.error(f"Failed to get stats: {e}")
             return None
     
-    def get_all_stats(self, head_user_id: int) -> dict:
-        """Собирает статистику по всем типам ботов для пользователя"""
+    async def get_all_stats(self, head_user_id: int) -> dict:
         stats = {}
-        
-        # Проверяем все известные привязки
-        for uid, binding in self._bindings.items():
-            if int(uid) == head_user_id:
-                bot_type = binding.get("bot_type", "unknown")
-                bot_stats = self.get_user_stats(head_user_id)
-                if bot_stats:
-                    stats[bot_type] = bot_stats
-        
+        binding = self.get_user_binding(head_user_id)
+        if binding:
+            bot_stats = await self.get_user_stats(head_user_id)
+            if bot_stats:
+                stats[binding["bot_type"]] = bot_stats
         return stats
 
 
-# Глобальный экземпляр
 registry = WorkerRegistry()

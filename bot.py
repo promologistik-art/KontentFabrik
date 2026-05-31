@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 async def main():
     await init_db()
-    registry.load()
+    await registry.load()
     logger.info(f"📋 Registry: {len(registry._workers)} workers, {len(registry._bindings)} bindings")
     
     app = (
@@ -31,9 +31,6 @@ async def main():
         .build()
     )
     
-    app.bot_data['registry'] = registry
-    
-    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("dashboard", dashboard))
     app.add_handler(CallbackQueryHandler(dashboard, pattern="^stats$"))

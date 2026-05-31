@@ -9,7 +9,9 @@ logger = logging.getLogger(__name__)
 
 os.makedirs(Config.DATA_DIR, exist_ok=True)
 
-engine = create_async_engine(f"sqlite+aiosqlite:///{Config.DB_PATH}", echo=False)
+DATABASE_URL = Config.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+
+engine = create_async_engine(DATABASE_URL, echo=False, pool_size=5, max_overflow=10)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
