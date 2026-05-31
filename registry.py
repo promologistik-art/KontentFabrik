@@ -1,5 +1,6 @@
 """Реестр ботов-исполнителей — PostgreSQL"""
 import logging
+from datetime import date
 from sqlalchemy import select, text
 from database import AsyncSessionLocal
 from models import Worker, UserBinding
@@ -89,8 +90,7 @@ class WorkerRegistry:
                 pending = result.scalar()
                 
                 # Сегодня
-                from datetime import datetime
-                today = datetime.utcnow().strftime("%Y-%m-%d")
+                today = date.today()
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
                     {"uid": worker_user_id, "today": today}
