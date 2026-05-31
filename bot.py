@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from config import Config
 from database import init_db
 from registry import registry
-from handlers import start, dashboard, refresh, debug
+from handlers import start, dashboard, refresh, debug, admin_panel
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -34,8 +34,10 @@ async def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("dashboard", dashboard))
     app.add_handler(CommandHandler("debug", debug))
+    app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CallbackQueryHandler(dashboard, pattern="^stats$"))
     app.add_handler(CallbackQueryHandler(refresh, pattern="^refresh$"))
+    app.add_handler(CallbackQueryHandler(admin_panel, pattern="^admin$"))
     
     await app.initialize()
     await app.start()

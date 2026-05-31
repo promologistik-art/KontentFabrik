@@ -68,19 +68,43 @@ class WorkerRegistry:
         
         try:
             async with AsyncSessionLocal() as session:
-                # Проекты
+                # Всего пользователей
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {prefix}users")
+                )
+                total_users = result.scalar()
+                
+                # Активных
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true")
+                )
+                active_users = result.scalar()
+                
+                # Проекты пользователя
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}projects WHERE user_id = :uid AND is_active = true"),
                     {"uid": worker_user_id}
                 )
                 projects = result.scalar()
                 
-                # Источники
+                # Всего проектов
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true")
+                )
+                total_projects = result.scalar()
+                
+                # Источники пользователя
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND is_active = true"),
                     {"uid": worker_user_id}
                 )
                 sources = result.scalar()
+                
+                # Всего источников
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE is_active = true")
+                )
+                total_sources = result.scalar()
                 
                 # В очереди
                 result = await session.execute(
@@ -89,19 +113,31 @@ class WorkerRegistry:
                 )
                 pending = result.scalar()
                 
-                # Сегодня
+                # Опубликовано сегодня (всего)
                 today = date.today()
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"),
+                    {"today": today}
+                )
+                posted_today = result.scalar()
+                
+                # Опубликовано пользователем сегодня
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
                     {"uid": worker_user_id, "today": today}
                 )
-                posted_today = result.scalar()
+                user_posted_today = result.scalar()
                 
                 return {
+                    "total_users": total_users,
+                    "active_users": active_users,
                     "projects": projects,
+                    "total_projects": total_projects,
                     "sources": sources,
+                    "total_sources": total_sources,
                     "pending": pending,
                     "posted_today": posted_today,
+                    "user_posted_today": user_posted_today,
                     "clone_id": binding["clone_id"],
                     "bot_type": binding["bot_type"]
                 }
@@ -117,6 +153,50 @@ class WorkerRegistry:
             if bot_stats:
                 stats[binding["bot_type"]] = bot_stats
         return stats
+    
+    async def get_admin_stats(self) -> dict:
+        """Статистика по всем клонам для админа"""
+        all_stats = {}
+        for key, worker in self._workers.items():
+            prefix = worker["db_prefix"]
+            try:
+                async with AsyncSessionLocal() as session:
+                    # Пользователи
+                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}users"))
+                    total_users = result.scalar()
+                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true"))
+                    active_users = result.scalar()
+                    
+                    # Проекты
+                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true"))
+                    total_projects = result.scalar()
+                    
+                    # Источники
+                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE is_active = true"))
+                    total_sources = result.scalar()
+                    
+                    # Очередь
+                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'pending'"))
+                    pending = result.scalar()
+                    
+                    # Сегодня
+                    today = date.today()
+                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"), {"today": today})
+                    posted_today = result.scalar()
+                    
+                    all_stats[key] = {
+                        "bot_username": worker["bot_username"],
+                        "total_users": total_users,
+                        "active_users": active_users,
+                        "total_projects": total_projects,
+                        "total_sources": total_sources,
+                        "pending": pending,
+                        "posted_today": posted_today
+                    }
+            except Exception as e:
+                logger.error(f"Admin stats failed for {key}: {e}")
+        
+        return all_stats
 
 
 registry = WorkerRegistry()

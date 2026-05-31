@@ -53,6 +53,12 @@ async def build_main_keyboard(user_id: int) -> list:
         InlineKeyboardButton("🔄 Обновить", callback_data="refresh")
     ])
     
+    # Кнопка админки для админа
+    if user_id == Config.ADMIN_ID:
+        keyboard.append([
+            InlineKeyboardButton("👑 Админка", callback_data="admin")
+        ])
+    
     return keyboard
 
 
@@ -71,10 +77,11 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for bot_type, stats in all_stats.items():
             text += (
                 f"📡 <b>{bot_type.upper()}</b> (клон #{stats.get('clone_id', '?')})\n"
-                f"   📁 Проектов: {stats.get('projects', 0)}\n"
-                f"   📥 Источников: {stats.get('sources', 0)}\n"
+                f"   👥 Пользователей: {stats.get('active_users', 0)} / {stats.get('total_users', 0)}\n"
+                f"   📁 Ваших проектов: {stats.get('projects', 0)} (всего: {stats.get('total_projects', 0)})\n"
+                f"   📥 Ваших источников: {stats.get('sources', 0)} (всего: {stats.get('total_sources', 0)})\n"
                 f"   📬 В очереди: {stats.get('pending', 0)}\n"
-                f"   📤 Сегодня: {stats.get('posted_today', 0)}\n\n"
+                f"   📤 Опубликовано сегодня: {stats.get('posted_today', 0)} (ваших: {stats.get('user_posted_today', 0)})\n\n"
             )
     else:
         workers = registry.get_workers_for_type("tg2tg")
@@ -98,6 +105,51 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             if "not modified" not in str(e).lower():
                 logger.error(f"Edit error: {e}")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Админ-панель: статистика по всем клонам"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    user_id = update.effective_user.id
+    if user_id != Config.ADMIN_ID:
+        if query:
+            await query.edit_message_text("❌ Доступ запрещён")
+        return
+    
+    await registry.reload()
+    all_stats = await registry.get_admin_stats()
+    
+    text = "👑 <b>Админ-панель KontentFabrik</b>\n\n"
+    
+    if all_stats:
+        for key, stats in all_stats.items():
+            text += (
+                f"📡 <b>{stats['bot_username']}</b> ({key})\n"
+                f"   👥 Пользователей: {stats['active_users']} / {stats['total_users']}\n"
+                f"   📁 Проектов: {stats['total_projects']}\n"
+                f"   📥 Источников: {stats['total_sources']}\n"
+                f"   📬 В очереди: {stats['pending']}\n"
+                f"   📤 Опубликовано сегодня: {stats['posted_today']}\n\n"
+            )
+    else:
+        text += "❌ Нет данных о клонах.\n"
+    
+    text += (
+        f"<b>Всего клонов:</b> {len(all_stats)}\n"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("🔄 Обновить", callback_data="admin")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="stats")],
+    ]
+    
+    if query:
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     else:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 

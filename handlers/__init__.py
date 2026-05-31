@@ -1,1 +1,1 @@
-from .dashboard import start, dashboard, refresh, debug
+from .dashboard import start, dashboard, refresh, debug, admin_panel
