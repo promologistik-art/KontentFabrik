@@ -41,6 +41,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_panel, pattern="^admin$"))
     app.add_handler(CallbackQueryHandler(admin_users, pattern="^admin_users$"))
     app.add_handler(CallbackQueryHandler(admin_set_tariff, pattern="^admin_tariff_"))
+    app.add_handler(CallbackQueryHandler(admin_tariffs_info, pattern="^admin_tariffs_info$"))
     
     await app.initialize()
     await app.start()
