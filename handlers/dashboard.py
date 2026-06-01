@@ -143,7 +143,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [InlineKeyboardButton("🔄 Обновить", callback_data="admin")],
-        [InlineKeyboardButton("👥 Управление пользователями", callback_data="admin_users")],
+        [InlineKeyboardButton("👥 Пользователи и тарифы", callback_data="admin_users")],
+        [InlineKeyboardButton("ℹ️ Инфо о тарифах", callback_data="admin_tariffs_info")],
         [InlineKeyboardButton("◀️ Назад", callback_data="stats")],
     ]
     
@@ -153,8 +154,43 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 
+async def admin_tariffs_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает информацию о тарифах"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    user_id = update.effective_user.id
+    if user_id != Config.ADMIN_ID:
+        return
+    
+    msg_text = (
+        "ℹ️ <b>Тарифы TG2TG</b>\n\n"
+        "🎁 <b>Trial</b> (пробный, 5 дней)\n"
+        "   📁 1 проект | 📥 3 источника\n"
+        "   ⏰ Постинг от 120 мин | 🔍 Парсинг от 60 мин\n\n"
+        "💳 <b>Basic</b> — 290 ₽/мес\n"
+        "   📁 1 проект | 📥 3 источника\n"
+        "   ⏰ Постинг от 120 мин | 🔍 Парсинг от 60 мин\n\n"
+        "💎 <b>Standard</b> — 590 ₽/мес\n"
+        "   📁 3 проекта | 📥 5 источников\n"
+        "   ⏰ Постинг от 60 мин | 🔍 Парсинг от 30 мин\n\n"
+        "👑 <b>PRO</b> — 990 ₽/мес\n"
+        "   📁 10 проектов | 📥 10 источников\n"
+        "   ⏰ Постинг от 30 мин | 🔍 Парсинг от 15 мин\n\n"
+        "♾️ <b>Unlimited</b> — только для админа\n"
+        "   📁 999 проектов | 📥 999 источников\n"
+        "   ⏰ Постинг от 1 мин | 🔍 Парсинг от 5 мин"
+    )
+    
+    keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="admin")]]
+    
+    if query:
+        await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+
 async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Список пользователей из всех клонов"""
+    """Список пользователей с текущими тарифами"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -165,7 +201,11 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await registry.reload()
     
-    result_text = "👥 <b>Пользователи</b>\n\n"
+    # Краткая памятка по тарифам
+    result_text = (
+        "👥 <b>Пользователи</b>\n"
+        "🎁Trial 💳Basic 💎Standard 👑PRO ♾️Unlimited\n\n"
+    )
     keyboard = []
     
     for key, worker in registry._workers.items():
@@ -180,17 +220,23 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 result_text += f"📡 <b>{worker['bot_username']}</b>:\n"
                 for u in users:
-                    result_text += f"  • {u[1] or '—'} (@{u[2] or '—'}) [{u[3]}]\n"
+                    tariff_emoji = {
+                        "trial": "🎁", "basic": "💳", "standard": "💎",
+                        "pro": "👑", "unlimited": "♾️"
+                    }.get(u[3], "❓")
+                    
+                    result_text += f"  {tariff_emoji} {u[1] or '—'} (@{u[2] or '—'}) [{u[3]}]\n"
                     keyboard.append([
                         InlineKeyboardButton(
-                            f"✏️ {u[1] or u[2] or u[0]}",
-                            callback_data=f"admin_tariff_{u[0]}"
+                            f"✏️ Сменить тариф: {u[1] or u[2] or u[0]}",
+                            callback_data=f"tariff_{u[0]}"
                         )
                     ])
                 result_text += "\n"
         except Exception as e:
             result_text += f"📡 {worker['bot_username']}: ошибка\n"
     
+    keyboard.append([InlineKeyboardButton("ℹ️ Что дают тарифы", callback_data="admin_tariffs_info")])
     keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="admin")])
     
     if query:
@@ -198,7 +244,7 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Установка тарифа пользователю"""
+    """Выбор тарифа для пользователя"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -207,54 +253,65 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id != Config.ADMIN_ID:
         return
     
-    data = query.data.replace("admin_tariff_", "")
+    data = query.data
     
-    if "_" in data and data.count("_") >= 2:
-        parts = data.split("_", 1)
-        worker_user_id = int(parts[0])
-        tariff = parts[1]
+    # tariff_USERID_TARIFFNAME
+    if data.startswith("tariff_") and data.count("_") >= 2:
+        parts = data.split("_", 2)
+        if len(parts) == 3:
+            worker_user_id = int(parts[1])
+            tariff = parts[2]
+            
+            for key, worker in registry._workers.items():
+                prefix = worker["db_prefix"]
+                try:
+                    async with AsyncSessionLocal() as session:
+                        from sqlalchemy import text as sql_text
+                        limits = {
+                            "trial": (1, 3, 120, 60),
+                            "basic": (1, 3, 120, 60),
+                            "standard": (3, 5, 60, 30),
+                            "pro": (10, 10, 30, 15),
+                            "unlimited": (999, 999, 1, 5),
+                        }
+                        mp, ms, pi, ci = limits.get(tariff, (1, 3, 120, 60))
+                        
+                        await session.execute(
+                            sql_text(f"UPDATE {prefix}users SET tariff = :t, max_projects = :mp, max_sources_per_project = :ms, min_post_interval_minutes = :pi, min_check_interval_minutes = :ci WHERE telegram_id = :uid"),
+                            {"t": tariff, "mp": mp, "ms": ms, "pi": pi, "ci": ci, "uid": worker_user_id}
+                        )
+                        await session.commit()
+                except Exception as e:
+                    logger.error(f"Failed to update tariff in {key}: {e}")
+            
+            tariff_names = {"trial": "🎁 Trial", "basic": "💳 Basic", "standard": "💎 Standard", "pro": "👑 PRO", "unlimited": "♾️ Unlimited"}
+            await query.edit_message_text(f"✅ Тариф обновлён до «{tariff_names.get(tariff, tariff)}»")
+            return
+    
+    # tariff_USERID — показать выбор тарифа
+    if data.startswith("tariff_"):
+        worker_user_id = int(data.replace("tariff_", ""))
+        context.user_data['admin_user_id'] = worker_user_id
         
-        for key, worker in registry._workers.items():
-            prefix = worker["db_prefix"]
-            try:
-                async with AsyncSessionLocal() as session:
-                    from sqlalchemy import text as sql_text
-                    limits = {
-                        "trial": (1, 3, 120, 60),
-                        "basic": (1, 3, 120, 60),
-                        "standard": (3, 5, 60, 30),
-                        "pro": (10, 10, 30, 15),
-                        "unlimited": (999, 999, 1, 5),
-                    }
-                    mp, ms, pi, ci = limits.get(tariff, (1, 3, 120, 60))
-                    
-                    await session.execute(
-                        sql_text(f"UPDATE {prefix}users SET tariff = :t, max_projects = :mp, max_sources_per_project = :ms, min_post_interval_minutes = :pi, min_check_interval_minutes = :ci WHERE telegram_id = :uid"),
-                        {"t": tariff, "mp": mp, "ms": ms, "pi": pi, "ci": ci, "uid": worker_user_id}
-                    )
-                    await session.commit()
-            except Exception as e:
-                logger.error(f"Failed to update tariff in {key}: {e}")
+        msg_text = (
+            f"Выберите тариф для пользователя:\n\n"
+            f"🎁 <b>Trial</b> — 1 проект, 3 источника, 5 дней\n"
+            f"💳 <b>Basic</b> — 1 проект, 3 источника, 290₽\n"
+            f"💎 <b>Standard</b> — 3 проекта, 5 источников, 590₽\n"
+            f"👑 <b>PRO</b> — 10 проектов, 10 источников, 990₽\n"
+            f"♾️ <b>Unlimited</b> — без ограничений"
+        )
         
-        await query.edit_message_text(f"✅ Тариф обновлён до «{tariff}»")
-        return
-    
-    worker_user_id = int(data)
-    context.user_data['admin_user_id'] = worker_user_id
-    
-    keyboard = [
-        [InlineKeyboardButton("🎁 Trial", callback_data=f"admin_tariff_{worker_user_id}_trial")],
-        [InlineKeyboardButton("💳 Basic", callback_data=f"admin_tariff_{worker_user_id}_basic")],
-        [InlineKeyboardButton("💎 Standard", callback_data=f"admin_tariff_{worker_user_id}_standard")],
-        [InlineKeyboardButton("👑 PRO", callback_data=f"admin_tariff_{worker_user_id}_pro")],
-        [InlineKeyboardButton("♾️ Unlimited", callback_data=f"admin_tariff_{worker_user_id}_unlimited")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="admin_users")],
-    ]
-    
-    await query.edit_message_text(
-        f"Выберите тариф для пользователя:\n",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+        keyboard = [
+            [InlineKeyboardButton("🎁 Trial", callback_data=f"tariff_{worker_user_id}_trial")],
+            [InlineKeyboardButton("💳 Basic", callback_data=f"tariff_{worker_user_id}_basic")],
+            [InlineKeyboardButton("💎 Standard", callback_data=f"tariff_{worker_user_id}_standard")],
+            [InlineKeyboardButton("👑 PRO", callback_data=f"tariff_{worker_user_id}_pro")],
+            [InlineKeyboardButton("♾️ Unlimited", callback_data=f"tariff_{worker_user_id}_unlimited")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="admin_users")],
+        ]
+        
+        await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 
 async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
