@@ -49,7 +49,7 @@ async def build_main_keyboard(user_id: int) -> list:
     keyboard.append([InlineKeyboardButton("📺 U2TG — YouTube→Telegram (скоро)", callback_data="noop")])
     keyboard.append([InlineKeyboardButton("📱 TG2VK — Telegram→VK (скоро)", callback_data="noop")])
     keyboard.append([
-        InlineKeyboardButton("📊 Статистика", callback_data="stats"),
+        InlineKeyboardButton("📊 Статистика", callback_data="show_stats"),
         InlineKeyboardButton("🔄 Обновить", callback_data="refresh")
     ])
     
@@ -101,13 +101,17 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = await build_main_keyboard(user_id)
     
     if query:
-        try:
-            await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-        except Exception as e:
-            if "not modified" not in str(e).lower():
-                logger.error(f"Edit error: {e}")
+        await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     else:
         await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+
+async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопки Статистика"""
+    query = update.callback_query
+    if query:
+        await query.answer("📊 Загружаю статистику...")
+    await dashboard(update, context)
 
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -145,7 +149,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔄 Обновить", callback_data="admin")],
         [InlineKeyboardButton("👥 Пользователи и тарифы", callback_data="admin_users")],
         [InlineKeyboardButton("ℹ️ Инфо о тарифах", callback_data="admin_tariffs_info")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="stats")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="show_stats")],
     ]
     
     if query:
@@ -155,7 +159,6 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def admin_tariffs_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает информацию о тарифах"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -190,7 +193,6 @@ async def admin_tariffs_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Список пользователей с текущими тарифами"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -201,7 +203,6 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await registry.reload()
     
-    # Краткая памятка по тарифам
     result_text = (
         "👥 <b>Пользователи</b>\n"
         "🎁Trial 💳Basic 💎Standard 👑PRO ♾️Unlimited\n\n"
@@ -244,7 +245,6 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выбор тарифа для пользователя"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -262,20 +262,20 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
             worker_user_id = int(parts[1])
             tariff = parts[2]
             
+            limits = {
+                "trial": (1, 3, 120, 60),
+                "basic": (1, 3, 120, 60),
+                "standard": (3, 5, 60, 30),
+                "pro": (10, 10, 30, 15),
+                "unlimited": (999, 999, 1, 5),
+            }
+            mp, ms, pi, ci = limits.get(tariff, (1, 3, 120, 60))
+            
             for key, worker in registry._workers.items():
                 prefix = worker["db_prefix"]
                 try:
                     async with AsyncSessionLocal() as session:
                         from sqlalchemy import text as sql_text
-                        limits = {
-                            "trial": (1, 3, 120, 60),
-                            "basic": (1, 3, 120, 60),
-                            "standard": (3, 5, 60, 30),
-                            "pro": (10, 10, 30, 15),
-                            "unlimited": (999, 999, 1, 5),
-                        }
-                        mp, ms, pi, ci = limits.get(tariff, (1, 3, 120, 60))
-                        
                         await session.execute(
                             sql_text(f"UPDATE {prefix}users SET tariff = :t, max_projects = :mp, max_sources_per_project = :ms, min_post_interval_minutes = :pi, min_check_interval_minutes = :ci WHERE telegram_id = :uid"),
                             {"t": tariff, "mp": mp, "ms": ms, "pi": pi, "ci": ci, "uid": worker_user_id}
@@ -284,11 +284,36 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error(f"Failed to update tariff in {key}: {e}")
             
-            tariff_names = {"trial": "🎁 Trial", "basic": "💳 Basic", "standard": "💎 Standard", "pro": "👑 PRO", "unlimited": "♾️ Unlimited"}
+            tariff_names = {
+                "trial": "🎁 Trial (пробный, 5 дней)",
+                "basic": "💳 Basic (290 ₽/мес)",
+                "standard": "💎 Standard (590 ₽/мес)",
+                "pro": "👑 PRO (990 ₽/мес)",
+                "unlimited": "♾️ Unlimited"
+            }
+            
+            # Уведомление пользователю
+            try:
+                await context.bot.send_message(
+                    chat_id=worker_user_id,
+                    text=(
+                        f"🔔 <b>Ваш тариф изменён!</b>\n\n"
+                        f"Новый тариф: {tariff_names.get(tariff, tariff)}\n"
+                        f"📁 Проектов: {mp}\n"
+                        f"📥 Источников на проект: {ms}\n"
+                        f"⏰ Мин. интервал постинга: {pi} мин\n"
+                        f"🔍 Мин. интервал парсинга: {ci} мин\n\n"
+                        f"По вопросам: @{Config.ADMIN_USERNAME}"
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to notify user {worker_user_id}: {e}")
+            
             await query.edit_message_text(f"✅ Тариф обновлён до «{tariff_names.get(tariff, tariff)}»")
             return
     
-    # tariff_USERID — показать выбор тарифа
+    # Показать выбор тарифа
     if data.startswith("tariff_"):
         worker_user_id = int(data.replace("tariff_", ""))
         context.user_data['admin_user_id'] = worker_user_id
@@ -296,9 +321,9 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg_text = (
             f"Выберите тариф для пользователя:\n\n"
             f"🎁 <b>Trial</b> — 1 проект, 3 источника, 5 дней\n"
-            f"💳 <b>Basic</b> — 1 проект, 3 источника, 290₽\n"
-            f"💎 <b>Standard</b> — 3 проекта, 5 источников, 590₽\n"
-            f"👑 <b>PRO</b> — 10 проектов, 10 источников, 990₽\n"
+            f"💳 <b>Basic</b> — 1 проект, 3 источника, 290₽/мес\n"
+            f"💎 <b>Standard</b> — 3 проекта, 5 источников, 590₽/мес\n"
+            f"👑 <b>PRO</b> — 10 проектов, 10 источников, 990₽/мес\n"
             f"♾️ <b>Unlimited</b> — без ограничений"
         )
         
