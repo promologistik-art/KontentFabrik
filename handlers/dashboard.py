@@ -72,9 +72,9 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     all_stats = await registry.get_all_stats(user_id)
     
     if all_stats:
-        text = "📊 <b>Ваш дашборд</b>\n\n"
+        msg_text = "📊 <b>Ваш дашборд</b>\n\n"
         for bot_type, stats in all_stats.items():
-            text += (
+            msg_text += (
                 f"📡 <b>{bot_type.upper()}</b> (клон #{stats.get('clone_id', '?')})\n"
                 f"   👥 Пользователей: {stats.get('active_users', 0)} / {stats.get('total_users', 0)}\n"
                 f"   📁 Ваших проектов: {stats.get('projects', 0)} (всего: {stats.get('total_projects', 0)})\n"
@@ -85,7 +85,7 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         workers = registry.get_workers_for_type("tg2tg")
         if workers:
-            text = (
+            msg_text = (
                 f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
                 f"Я — единый центр управления парсерами.\n\n"
                 f"📡 <b>TG2TG</b> — парсинг Telegram → постинг в Telegram\n"
@@ -96,18 +96,18 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"/help — все команды"
             )
         else:
-            text = "❌ Нет доступных клонов.\n\n📺 U2TG: скоро\n📱 TG2VK: скоро"
+            msg_text = "❌ Нет доступных клонов.\n\n📺 U2TG: скоро\n📱 TG2VK: скоро"
     
     keyboard = await build_main_keyboard(user_id)
     
     if query:
         try:
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         except Exception as e:
             if "not modified" not in str(e).lower():
                 logger.error(f"Edit error: {e}")
     else:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -124,11 +124,11 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await registry.reload()
     all_stats = await registry.get_admin_stats()
     
-    text = "👑 <b>Админ-панель KontentFabrik</b>\n\n"
+    msg_text = "👑 <b>Админ-панель KontentFabrik</b>\n\n"
     
     if all_stats:
         for key, stats in all_stats.items():
-            text += (
+            msg_text += (
                 f"📡 <b>{stats['bot_username']}</b> ({key})\n"
                 f"   👥 Пользователей: {stats['active_users']} / {stats['total_users']}\n"
                 f"   📁 Проектов: {stats['total_projects']}\n"
@@ -137,9 +137,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"   📤 Опубликовано сегодня: {stats['posted_today']}\n\n"
             )
     else:
-        text += "❌ Нет данных о клонах.\n"
+        msg_text += "❌ Нет данных о клонах.\n"
     
-    text += f"<b>Всего клонов:</b> {len(all_stats)}\n"
+    msg_text += f"<b>Всего клонов:</b> {len(all_stats)}\n"
     
     keyboard = [
         [InlineKeyboardButton("🔄 Обновить", callback_data="admin")],
@@ -148,9 +148,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     if query:
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     else:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 
 async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -165,36 +165,36 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await registry.reload()
     
-    text = "👥 <b>Пользователи</b>\n\n"
+    result_text = "👥 <b>Пользователи</b>\n\n"
     keyboard = []
     
     for key, worker in registry._workers.items():
         prefix = worker["db_prefix"]
         try:
             async with AsyncSessionLocal() as session:
-                from sqlalchemy import text
+                from sqlalchemy import text as sql_text
                 result = await session.execute(
-                    text(f"SELECT telegram_id, full_name, username, tariff FROM {prefix}users ORDER BY telegram_id")
+                    sql_text(f"SELECT telegram_id, full_name, username, tariff FROM {prefix}users ORDER BY telegram_id")
                 )
                 users = result.fetchall()
                 
-                text += f"📡 <b>{worker['bot_username']}</b>:\n"
+                result_text += f"📡 <b>{worker['bot_username']}</b>:\n"
                 for u in users:
-                    text += f"  • {u[1] or '—'} (@{u[2] or '—'}) [{u[3]}]\n"
+                    result_text += f"  • {u[1] or '—'} (@{u[2] or '—'}) [{u[3]}]\n"
                     keyboard.append([
                         InlineKeyboardButton(
                             f"✏️ {u[1] or u[2] or u[0]}",
                             callback_data=f"admin_tariff_{u[0]}"
                         )
                     ])
-                text += "\n"
+                result_text += "\n"
         except Exception as e:
-            text += f"📡 {worker['bot_username']}: ошибка\n"
+            result_text += f"📡 {worker['bot_username']}: ошибка\n"
     
     keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="admin")])
     
     if query:
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await query.edit_message_text(result_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 
 async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -210,17 +210,15 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data.replace("admin_tariff_", "")
     
     if "_" in data and data.count("_") >= 2:
-        # admin_tariff_USERID_TARIFF
         parts = data.split("_", 1)
         worker_user_id = int(parts[0])
         tariff = parts[1]
         
-        # Обновляем тариф во всех клонах
         for key, worker in registry._workers.items():
             prefix = worker["db_prefix"]
             try:
                 async with AsyncSessionLocal() as session:
-                    from sqlalchemy import text
+                    from sqlalchemy import text as sql_text
                     limits = {
                         "trial": (1, 3, 120, 60),
                         "basic": (1, 3, 120, 60),
@@ -231,7 +229,7 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     mp, ms, pi, ci = limits.get(tariff, (1, 3, 120, 60))
                     
                     await session.execute(
-                        text(f"UPDATE {prefix}users SET tariff = :t, max_projects = :mp, max_sources_per_project = :ms, min_post_interval_minutes = :pi, min_check_interval_minutes = :ci WHERE telegram_id = :uid"),
+                        sql_text(f"UPDATE {prefix}users SET tariff = :t, max_projects = :mp, max_sources_per_project = :ms, min_post_interval_minutes = :pi, min_check_interval_minutes = :ci WHERE telegram_id = :uid"),
                         {"t": tariff, "mp": mp, "ms": ms, "pi": pi, "ci": ci, "uid": worker_user_id}
                     )
                     await session.commit()
@@ -241,7 +239,6 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"✅ Тариф обновлён до «{tariff}»")
         return
     
-    # Показываем выбор тарифа
     worker_user_id = int(data)
     context.user_data['admin_user_id'] = worker_user_id
     
@@ -270,7 +267,7 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
-    text = (
+    msg_text = (
         "📚 <b>KontentFabrik — Справка</b>\n\n"
         "Я управляю всеми парсерами из одного места.\n\n"
         "<b>📡 Доступные сервисы:</b>\n"
@@ -284,37 +281,37 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     if user_id == Config.ADMIN_ID:
-        text += (
+        msg_text += (
             "\n<b>👑 Админ:</b>\n"
             "/admin — админ-панель\n"
         )
     
-    text += (
+    msg_text += (
         f"\n📲 <a href='https://t.me/{Config.ADMIN_USERNAME or 'admin'}'>Написать админу</a>"
         f"\n📢 <a href='https://t.me/+MAuGbcnBQmgxZTIy'>Больше ботов в канале</a>"
     )
     
-    await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
+    await update.message.reply_text(msg_text, parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await registry.reload()
     
-    text = f"🔍 <b>Debug info</b>\n\n"
-    text += f"Ваш ID: {user_id}\n\n"
-    text += f"<b>Workers:</b> {len(registry._workers)}\n"
+    msg_text = f"🔍 <b>Debug info</b>\n\n"
+    msg_text += f"Ваш ID: {user_id}\n\n"
+    msg_text += f"<b>Workers:</b> {len(registry._workers)}\n"
     for k, w in registry._workers.items():
-        text += f"  {k}: {w['bot_username']}\n"
+        msg_text += f"  {k}: {w['bot_username']}\n"
     
-    text += f"\n<b>Bindings:</b> {len(registry._bindings)}\n"
+    msg_text += f"\n<b>Bindings:</b> {len(registry._bindings)}\n"
     for k, b in registry._bindings.items():
-        text += f"  head={b['head_user_id']} → {b['bot_type']}#{b['clone_id']}\n"
+        msg_text += f"  head={b['head_user_id']} → {b['bot_type']}#{b['clone_id']}\n"
     
     binding = registry.get_user_binding(user_id)
-    text += f"\n<b>Ваша привязка:</b> {binding}"
+    msg_text += f"\n<b>Ваша привязка:</b> {binding}"
     
     stats = await registry.get_all_stats(user_id)
-    text += f"\n\n<b>Статистика:</b> {stats}"
+    msg_text += f"\n\n<b>Статистика:</b> {stats}"
     
-    await update.message.reply_text(text, parse_mode="HTML")
+    await update.message.reply_text(msg_text, parse_mode="HTML")
