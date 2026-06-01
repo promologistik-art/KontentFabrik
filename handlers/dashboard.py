@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime
+import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from database import AsyncSessionLocal
@@ -26,7 +28,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ))
             await session.commit()
     
-    await dashboard(update, context)
+    await show_stats(update, context)
 
 
 async def build_main_keyboard(user_id: int) -> list:
@@ -62,6 +64,12 @@ async def build_main_keyboard(user_id: int) -> list:
 
 
 async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Устаревший обработчик — перенаправляет на show_stats"""
+    await show_stats(update, context)
+
+
+async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает дашборд со статистикой"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -71,8 +79,12 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     all_stats = await registry.get_all_stats(user_id)
     
+    # Время обновления по Москве
+    msk_tz = pytz.timezone(Config.TIMEZONE)
+    now_msk = datetime.now(msk_tz).strftime("%H:%M")
+    
     if all_stats:
-        msg_text = "📊 <b>Ваш дашборд</b>\n\n"
+        msg_text = f"📊 <b>Ваш дашборд</b>  <i>обновлено в {now_msk} МСК</i>\n\n"
         for bot_type, stats in all_stats.items():
             msg_text += (
                 f"📡 <b>{bot_type.upper()}</b> (клон #{stats.get('clone_id', '?')})\n"
@@ -96,7 +108,7 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"/help — все команды"
             )
         else:
-            msg_text = "❌ Нет доступных клонов.\n\n📺 U2TG: скоро\n📱 TG2VK: скоро"
+            msg_text = f"❌ Нет доступных клонов. <i>обновлено в {now_msk} МСК</i>\n\n📺 U2TG: скоро\n📱 TG2VK: скоро"
     
     keyboard = await build_main_keyboard(user_id)
     
@@ -104,14 +116,6 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     else:
         await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
-
-async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки Статистика"""
-    query = update.callback_query
-    if query:
-        await query.answer("📊 Загружаю статистику...")
-    await dashboard(update, context)
 
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -343,7 +347,7 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
         await query.answer("Обновлено ✅")
-    await dashboard(update, context)
+    await show_stats(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
