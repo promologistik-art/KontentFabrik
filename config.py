@@ -11,6 +11,9 @@ class Config:
     # PostgreSQL
     DATABASE_URL = os.getenv("DATABASE_URL")
     
+    # Время
+    TIMEZONE = "Europe/Moscow"
+    
     # Пути
     SHARED_DIR = os.getenv("SHARED_DIR", "/app/shared")
     DATA_DIR = os.path.join(SHARED_DIR, "data")
