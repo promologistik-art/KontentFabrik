@@ -58,6 +58,30 @@ class WorkerRegistry:
     def get_user_binding(self, head_user_id: int) -> dict | None:
         return self._bindings.get(str(head_user_id))
     
+    async def get_least_loaded_worker(self, bot_type: str) -> dict | None:
+        """Выбирает клона с наименьшим числом активных пользователей"""
+        candidates = []
+        for key, worker in self._workers.items():
+            if worker["bot_type"] == bot_type:
+                prefix = worker["db_prefix"]
+                try:
+                    async with AsyncSessionLocal() as session:
+                        result = await session.execute(
+                            text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true")
+                        )
+                        user_count = result.scalar()
+                        candidates.append((worker, user_count))
+                except Exception as e:
+                    logger.error(f"Failed to count users for {key}: {e}")
+                    candidates.append((worker, 999))
+        
+        if not candidates:
+            return None
+        
+        candidates.sort(key=lambda x: x[1])
+        logger.info(f"⚖️ Selected {candidates[0][0]['bot_username']} ({candidates[0][1]} users)")
+        return candidates[0][0]
+    
     async def get_user_stats(self, head_user_id: int) -> dict | None:
         binding = self.get_user_binding(head_user_id)
         if not binding:
@@ -161,25 +185,20 @@ class WorkerRegistry:
             prefix = worker["db_prefix"]
             try:
                 async with AsyncSessionLocal() as session:
-                    # Пользователи
                     result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}users"))
                     total_users = result.scalar()
                     result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true"))
                     active_users = result.scalar()
                     
-                    # Проекты
                     result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true"))
                     total_projects = result.scalar()
                     
-                    # Источники
                     result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE is_active = true"))
                     total_sources = result.scalar()
                     
-                    # Очередь
                     result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'pending'"))
                     pending = result.scalar()
                     
-                    # Сегодня
                     today = date.today()
                     result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"), {"today": today})
                     posted_today = result.scalar()

@@ -36,10 +36,23 @@ async def build_main_keyboard(user_id: int) -> list:
     
     tg2tg_workers = registry.get_workers_for_type("tg2tg")
     if tg2tg_workers:
-        worker = tg2tg_workers[0]
+        # Выбираем клона: если уже есть привязка — используем её, иначе — наименее загруженный
+        binding = registry.get_user_binding(user_id)
+        if binding and binding["bot_type"] == "tg2tg":
+            clone_id = binding["clone_id"]
+            worker = None
+            for w in tg2tg_workers:
+                if w["clone_id"] == clone_id:
+                    worker = w
+                    break
+            if not worker:
+                worker = tg2tg_workers[0]
+        else:
+            worker = await registry.get_least_loaded_worker("tg2tg")
+        
         keyboard.append([
             InlineKeyboardButton(
-                "📡 TG2TG — Telegram→Telegram",
+                f"📡 TG2TG (клон #{worker['clone_id']})",
                 url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
             )
         ])
@@ -64,12 +77,10 @@ async def build_main_keyboard(user_id: int) -> list:
 
 
 async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Устаревший обработчик — перенаправляет на show_stats"""
     await show_stats(update, context)
 
 
 async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает дашборд со статистикой"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -79,7 +90,6 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     all_stats = await registry.get_all_stats(user_id)
     
-    # Время обновления по Москве
     msk_tz = pytz.timezone(Config.TIMEZONE)
     now_msk = datetime.now(msk_tz).strftime("%H:%M")
     
@@ -259,7 +269,6 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
     
-    # tariff_USERID_TARIFFNAME
     if data.startswith("tariff_") and data.count("_") >= 2:
         parts = data.split("_", 2)
         if len(parts) == 3:
@@ -296,7 +305,6 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "unlimited": "♾️ Unlimited"
             }
             
-            # Уведомление пользователю
             try:
                 await context.bot.send_message(
                     chat_id=worker_user_id,
@@ -317,7 +325,6 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"✅ Тариф обновлён до «{tariff_names.get(tariff, tariff)}»")
             return
     
-    # Показать выбор тарифа
     if data.startswith("tariff_"):
         worker_user_id = int(data.replace("tariff_", ""))
         context.user_data['admin_user_id'] = worker_user_id
