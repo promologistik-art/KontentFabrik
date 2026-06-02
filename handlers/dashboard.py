@@ -34,9 +34,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def build_main_keyboard(user_id: int) -> list:
     keyboard = []
     
+    # TG2TG
     tg2tg_workers = registry.get_workers_for_type("tg2tg")
     if tg2tg_workers:
-        # Выбираем клона: если уже есть привязка — используем её, иначе — наименее загруженный
         binding = registry.get_user_binding(user_id)
         if binding and binding["bot_type"] == "tg2tg":
             clone_id = binding["clone_id"]
@@ -48,7 +48,7 @@ async def build_main_keyboard(user_id: int) -> list:
             if not worker:
                 worker = tg2tg_workers[0]
         else:
-            worker = await registry.get_least_loaded_worker("tg2tg")
+            worker = tg2tg_workers[0]
         
         keyboard.append([
             InlineKeyboardButton(
@@ -61,8 +61,24 @@ async def build_main_keyboard(user_id: int) -> list:
             InlineKeyboardButton("📡 TG2TG — Telegram→Telegram (нет клонов)", callback_data="noop")
         ])
     
-    keyboard.append([InlineKeyboardButton("📺 U2TG — YouTube→Telegram (скоро)", callback_data="noop")])
+    # U2TG
+    u2tg_workers = registry.get_workers_for_type("u2tg")
+    if u2tg_workers:
+        worker = u2tg_workers[0]
+        keyboard.append([
+            InlineKeyboardButton(
+                f"📺 U2TG (клон #{worker['clone_id']})",
+                url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
+            )
+        ])
+    else:
+        keyboard.append([
+            InlineKeyboardButton("📺 U2TG — YouTube→Telegram (скоро)", callback_data="noop")
+        ])
+    
+    # TG2VK
     keyboard.append([InlineKeyboardButton("📱 TG2VK — Telegram→VK (скоро)", callback_data="noop")])
+    
     keyboard.append([
         InlineKeyboardButton("📊 Статистика", callback_data="show_stats"),
         InlineKeyboardButton("🔄 Обновить", callback_data="refresh")
@@ -105,13 +121,14 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"   📤 Опубликовано сегодня: {stats.get('posted_today', 0)} (ваших: {stats.get('user_posted_today', 0)})\n\n"
             )
     else:
-        workers = registry.get_workers_for_type("tg2tg")
-        if workers:
+        workers_tg = registry.get_workers_for_type("tg2tg")
+        workers_yt = registry.get_workers_for_type("u2tg")
+        if workers_tg or workers_yt:
             msg_text = (
                 f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
                 f"Я — единый центр управления парсерами.\n\n"
                 f"📡 <b>TG2TG</b> — парсинг Telegram → постинг в Telegram\n"
-                f"📺 <b>U2TG</b> — парсинг YouTube Shorts (скоро)\n"
+                f"📺 <b>U2TG</b> — парсинг YouTube → постинг в Telegram\n"
                 f"📱 <b>TG2VK</b> — Telegram → VK (скоро)\n\n"
                 f"Нажмите кнопку ниже, чтобы перейти в нужный сервис.\n"
                 f"Затем вернитесь сюда и нажмите «Статистика».\n\n"
@@ -182,7 +199,7 @@ async def admin_tariffs_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     msg_text = (
-        "ℹ️ <b>Тарифы TG2TG</b>\n\n"
+        "ℹ️ <b>Тарифы</b>\n\n"
         "🎁 <b>Trial</b> (пробный, 5 дней)\n"
         "   📁 1 проект | 📥 3 источника\n"
         "   ⏰ Постинг от 120 мин | 🔍 Парсинг от 60 мин\n\n"
@@ -365,7 +382,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Я управляю всеми парсерами из одного места.\n\n"
         "<b>📡 Доступные сервисы:</b>\n"
         "• TG2TG — парсинг Telegram-каналов и постинг в Telegram\n"
-        "• U2TG — парсинг YouTube Shorts (скоро)\n"
+        "• U2TG — парсинг YouTube и постинг в Telegram\n"
         "• TG2VK — парсинг Telegram и постинг в VK (скоро)\n\n"
         "<b>Команды:</b>\n"
         "/start — дашборд\n"
