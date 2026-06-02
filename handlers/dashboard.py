@@ -234,6 +234,12 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await registry.reload()
     
+    bot_labels = {
+        "tg2tg": "из Telegram в Telegram",
+        "u2tg": "из YouTube в Telegram",
+        "tg2vk": "из Telegram в VK"
+    }
+    
     result_text = (
         "👥 <b>Пользователи</b>\n"
         "🎁Trial 💳Basic 💎Standard 👑PRO ♾️Unlimited\n\n"
@@ -242,6 +248,7 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     for key, worker in registry._workers.items():
         prefix = worker["db_prefix"]
+        label = bot_labels.get(worker['bot_type'], worker['bot_type'])
         try:
             async with AsyncSessionLocal() as session:
                 from sqlalchemy import text as sql_text
@@ -250,17 +257,19 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 users = result.fetchall()
                 
-                result_text += f"📡 <b>{worker['bot_username']}</b>:\n"
+                result_text += f"📡 <b>{worker['bot_username']}</b> — {label}:\n"
                 for u in users:
                     tariff_emoji = {
                         "trial": "🎁", "basic": "💳", "standard": "💎",
                         "pro": "👑", "unlimited": "♾️"
                     }.get(u[3], "❓")
                     
-                    result_text += f"  {tariff_emoji} {u[1] or '—'} (@{u[2] or '—'}) [{u[3]}]\n"
+                    name = u[1] or '—'
+                    uname = u[2] or '—'
+                    result_text += f"  {tariff_emoji} {name} (@{uname}) [{u[3]}]\n"
                     keyboard.append([
                         InlineKeyboardButton(
-                            f"✏️ Сменить тариф: {u[1] or u[2] or u[0]}",
+                            f"✏️ Сменить тариф: {name}",
                             callback_data=f"tariff_{u[0]}"
                         )
                     ])
