@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, date as dt_date
+from datetime import datetime
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -34,46 +34,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def build_main_keyboard(user_id: int) -> list:
     keyboard = []
     
-    tg2tg_workers = registry.get_workers_for_type("tg2tg")
-    if tg2tg_workers:
-        binding = registry.get_user_binding(user_id)
-        bound_clone_id = binding["clone_id"] if binding and binding["bot_type"] == "tg2tg" else None
-        
-        for worker in tg2tg_workers:
-            is_bound = worker["clone_id"] == bound_clone_id
-            label = f"📡 TG2TG (клон #{worker['clone_id']})"
-            if is_bound:
-                label = f"✅ TG2TG (клон #{worker['clone_id']}) — ваш"
-            
-            keyboard.append([
-                InlineKeyboardButton(
-                    label,
-                    callback_data=f"clone_tg2tg_{worker['clone_id']}"
-                )
-            ])
-    else:
+    has_tg2tg = bool(registry.get_workers_for_type("tg2tg"))
+    has_u2tg = bool(registry.get_workers_for_type("u2tg"))
+    
+    if has_tg2tg:
+        tg2tg_workers = registry.get_workers_for_type("tg2tg")
+        worker = tg2tg_workers[0]
         keyboard.append([
-            InlineKeyboardButton("📡 TG2TG — Telegram→Telegram (нет клонов)", callback_data="noop")
+            InlineKeyboardButton(
+                "📡 TG2TG — открыть бота",
+                url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
+            )
         ])
     
-    u2tg_workers = registry.get_workers_for_type("u2tg")
-    if u2tg_workers:
-        for worker in u2tg_workers:
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"📺 U2TG (клон #{worker['clone_id']})",
-                    callback_data=f"clone_u2tg_{worker['clone_id']}"
-                )
-            ])
-    else:
+    if has_u2tg:
+        u2tg_workers = registry.get_workers_for_type("u2tg")
+        worker = u2tg_workers[0]
         keyboard.append([
-            InlineKeyboardButton("📺 U2TG — YouTube→Telegram (скоро)", callback_data="noop")
+            InlineKeyboardButton(
+                "📺 U2TG — открыть бота",
+                url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
+            )
         ])
-    
-    keyboard.append([InlineKeyboardButton("📱 TG2VK — Telegram→VK (скоро)", callback_data="noop")])
     
     keyboard.append([
-        InlineKeyboardButton("📊 Общая статистика", callback_data="show_stats"),
         InlineKeyboardButton("🔄 Обновить", callback_data="refresh")
     ])
     
@@ -89,152 +73,6 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_stats(update, context)
 
 
-async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if query:
-        await query.answer()
-    
-    data = query.data
-    
-    if data.startswith("clone_tg2tg_"):
-        bot_type = "tg2tg"
-        clone_id = int(data.replace("clone_tg2tg_", ""))
-    elif data.startswith("clone_u2tg_"):
-        bot_type = "u2tg"
-        clone_id = int(data.replace("clone_u2tg_", ""))
-    else:
-        return
-    
-    user_id = update.effective_user.id
-    is_admin = (user_id == Config.ADMIN_ID)
-    
-    worker = None
-    for key, w in registry._workers.items():
-        if w["bot_type"] == bot_type and w["clone_id"] == clone_id:
-            worker = w
-            break
-    
-    if not worker:
-        await query.edit_message_text("❌ Клон не найден")
-        return
-    
-    prefix = worker["db_prefix"]
-    binding = registry.get_user_binding(user_id)
-    
-    msg_text = f"📡 <b>{worker['bot_username']}</b> (клон #{clone_id})\n"
-    msg_text += f"🔗 <a href='https://t.me/{worker['bot_username']}'>Открыть бота</a>\n\n"
-    
-    try:
-        async with AsyncSessionLocal() as session:
-            from sqlalchemy import text as sql_text
-            
-            result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true"))
-            active_users = result.scalar()
-            
-            result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true"))
-            total_projects = result.scalar()
-            
-            result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'pending'"))
-            pending = result.scalar()
-            
-            today_date = dt_date.today()
-            result = await session.execute(
-                sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"),
-                {"today": today_date}
-            )
-            posted_today = result.scalar()
-            
-            msg_text += (
-                f"👥 Пользователей: {active_users}\n"
-                f"📁 Всего проектов: {total_projects}\n"
-                f"📬 В очереди: {pending}\n"
-                f"📤 Опубликовано сегодня: {posted_today}\n\n"
-            )
-            
-            if binding and binding["bot_type"] == bot_type and binding["clone_id"] == clone_id:
-                worker_user_id = binding["worker_user_id"]
-                
-                result = await session.execute(
-                    sql_text(f"SELECT COUNT(*) FROM {prefix}projects WHERE user_id = :uid AND is_active = true"),
-                    {"uid": worker_user_id}
-                )
-                user_projects = result.scalar()
-                
-                result = await session.execute(
-                    sql_text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND is_active = true"),
-                    {"uid": worker_user_id}
-                )
-                user_sources = result.scalar()
-                
-                result = await session.execute(
-                    sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'pending'"),
-                    {"uid": worker_user_id}
-                )
-                user_pending = result.scalar()
-                
-                result = await session.execute(
-                    sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
-                    {"uid": worker_user_id, "today": today_date}
-                )
-                user_posted = result.scalar()
-                
-                msg_text += (
-                    f"<b>Ваши данные:</b>\n"
-                    f"📁 Проектов: {user_projects}\n"
-                    f"📥 Источников: {user_sources}\n"
-                    f"📬 В очереди: {user_pending}\n"
-                    f"📤 Опубликовано сегодня: {user_posted}\n\n"
-                )
-                
-                result = await session.execute(
-                    sql_text(f"""
-                        SELECT p.name,
-                               (SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id = p.id AND is_active = true) as sources,
-                               (SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id = p.id AND status = 'pending') as pending,
-                               (SELECT MAX(published_at) FROM {prefix}post_queue WHERE project_id = p.id AND status = 'published') as last_post,
-                               p.posts_posted_today
-                        FROM {prefix}projects p
-                        WHERE p.user_id = :uid AND p.is_active = true
-                        ORDER BY p.id
-                    """),
-                    {"uid": worker_user_id}
-                )
-                projects = result.fetchall()
-                
-                if projects:
-                    msg_text += "<b>📁 Ваши проекты:</b>\n"
-                    for p in projects:
-                        status_icon = "🟢"
-                        if p[3]:
-                            hours_since = (datetime.utcnow() - p[3]).total_seconds() / 3600
-                            if hours_since > 24:
-                                status_icon = "🔴"
-                            elif hours_since > 6:
-                                status_icon = "🟡"
-                        else:
-                            status_icon = "⚪"
-                        
-                        last = p[3].strftime("%d.%m %H:%M") if p[3] else "нет данных"
-                        msg_text += (
-                            f"{status_icon} <b>{p[0]}</b>\n"
-                            f"   📥 {p[1]} ист. | 📬 {p[2]} в очереди | 📤 {p[4]} сегодня | 🕐 {last}\n"
-                        )
-            else:
-                msg_text += "⚠️ Вы не привязаны к этому клону. Нажмите «Открыть бота» и нажмите /start для привязки.\n"
-                
-    except Exception as e:
-        logger.error(f"Failed to get clone info: {e}")
-        msg_text += f"❌ Ошибка загрузки данных"
-    
-    if is_admin:
-        msg_text += f"\n🆔 Префикс таблиц: {prefix}"
-    
-    keyboard = await build_main_keyboard(user_id)
-    
-    if query:
-        await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML", disable_web_page_preview=True)
-
-
 async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
@@ -244,48 +82,40 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = (user_id == Config.ADMIN_ID)
     await registry.reload()
     
-    all_stats = await registry.get_all_stats(user_id)
+    user_data = await registry.get_all_user_data(user_id)
     
     msk_tz = pytz.timezone(Config.TIMEZONE)
     now_msk = datetime.now(msk_tz).strftime("%H:%M")
     
-    if all_stats:
-        msg_text = f"📊 <b>Общая статистика</b>  <i>обновлено в {now_msk} МСК</i>\n\n"
-        for bot_type, stats in all_stats.items():
-            clone_num = stats.get('clone_id', '?')
+    if user_data:
+        msg_text = f"📊 <b>Ваш дашборд</b>  <i>обновлено в {now_msk} МСК</i>\n\n"
+        
+        for bot_type, data in user_data.items():
+            bot_link = f"https://t.me/{data['bot_username']}?start=kf_{user_id}"
+            msg_text += (
+                f"📡 <b><a href='{bot_link}'>{bot_type.upper()}</a></b> (клон #{data['clone_id']})\n"
+                f"   📁 Проектов: {data['projects']}\n"
+                f"   📥 Источников: {data['sources']}\n"
+                f"   📬 В очереди: {data['pending']}\n"
+                f"   📤 Опубликовано сегодня: {data['posted_today']}\n\n"
+            )
             
-            worker_link = ""
-            for key, w in registry._workers.items():
-                if w["bot_type"] == bot_type and w["clone_id"] == clone_num:
-                    worker_link = f"https://t.me/{w['bot_username']}"
-                    break
-            
-            if is_admin:
-                msg_text += (
-                    f"📡 <b><a href='{worker_link}'>{bot_type.upper()} (клон #{clone_num})</a></b>\n"
-                    f"   👥 Пользователей: {stats.get('active_users', 0)} / {stats.get('total_users', 0)}\n"
-                    f"   📁 Ваших проектов: {stats.get('projects', 0)} (всего: {stats.get('total_projects', 0)})\n"
-                    f"   📥 Ваших источников: {stats.get('sources', 0)} (всего: {stats.get('total_sources', 0)})\n"
-                    f"   📬 В очереди: {stats.get('pending', 0)}\n"
-                    f"   📤 Опубликовано сегодня: {stats.get('posted_today', 0)} (ваших: {stats.get('user_posted_today', 0)})\n\n"
-                )
-            else:
-                msg_text += (
-                    f"📡 <b><a href='{worker_link}'>{bot_type.upper()} (клон #{clone_num})</a></b>\n"
-                    f"   📁 Проектов: {stats.get('projects', 0)}\n"
-                    f"   📥 Источников: {stats.get('sources', 0)}\n"
-                    f"   📬 В очереди: {stats.get('pending', 0)}\n"
-                    f"   📤 Опубликовано сегодня: {stats.get('user_posted_today', 0)}\n\n"
-                )
+            if data['projects_list']:
+                msg_text += "<b>📁 Проекты:</b>\n"
+                for p in data['projects_list']:
+                    msg_text += (
+                        f"{p['status']} <b>{p['name']}</b>\n"
+                        f"   📥 {p['sources']} ист. | 📬 {p['pending']} в очереди | 📤 {p['posted_today']} сегодня | 🕐 {p['last_post']}\n"
+                    )
+                msg_text += "\n"
     else:
-        workers_tg = registry.get_workers_for_type("tg2tg")
-        workers_yt = registry.get_workers_for_type("u2tg")
-        if workers_tg or workers_yt:
+        has_any = bool(registry.get_workers_for_type("tg2tg")) or bool(registry.get_workers_for_type("u2tg"))
+        if has_any:
             msg_text = (
                 f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
                 f"Я — единый центр управления парсерами.\n\n"
-                f"Нажмите на клон ниже для подробностей.\n"
-                f"Ссылка в тексте откроет бота.\n\n"
+                f"Нажмите кнопку ниже, чтобы открыть бота и создать привязку.\n"
+                f"Затем нажмите «Обновить» для просмотра статистики.\n\n"
                 f"/help — все команды"
             )
         else:
@@ -345,7 +175,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👥 Пользователи и тарифы", callback_data="admin_users")],
         [InlineKeyboardButton("ℹ️ Инфо о тарифах", callback_data="admin_tariffs_info")],
         [InlineKeyboardButton("🧹 Очистить зависшие посты", callback_data="admin_clear_stuck")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="show_stats")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="refresh")],
     ]
     
     if query:
@@ -635,10 +465,11 @@ async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for k, b in registry._bindings.items():
         msg_text += f"  head={b['head_user_id']} → {b['bot_type']}#{b['clone_id']}\n"
     
-    binding = registry.get_user_binding(user_id)
-    msg_text += f"\n<b>Ваша привязка:</b> {binding}"
+    msg_text += f"\n<b>Ваши привязки:</b>\n"
+    for b in registry.get_user_bindings(user_id):
+        msg_text += f"  {b['bot_type']}#{b['clone_id']}\n"
     
-    stats = await registry.get_all_stats(user_id)
-    msg_text += f"\n\n<b>Статистика:</b> {stats}"
+    user_data = await registry.get_all_user_data(user_id)
+    msg_text += f"\n<b>Данные:</b> {list(user_data.keys())}"
     
     await update.message.reply_text(msg_text, parse_mode="HTML")

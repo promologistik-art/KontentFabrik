@@ -48,176 +48,112 @@ class WorkerRegistry:
     async def reload(self):
         await self.load()
     
-    def get_least_loaded(self, bot_type: str) -> dict | None:
-        candidates = [w for w in self._workers.values() if w["bot_type"] == bot_type]
-        return candidates[0] if candidates else None
-    
     def get_workers_for_type(self, bot_type: str) -> list:
         return [w for w in self._workers.values() if w["bot_type"] == bot_type]
     
     def get_user_binding(self, head_user_id: int) -> dict | None:
         return self._bindings.get(str(head_user_id))
     
-    async def get_least_loaded_worker(self, bot_type: str) -> dict | None:
-        candidates = []
-        for key, worker in self._workers.items():
-            if worker["bot_type"] == bot_type:
-                prefix = worker["db_prefix"]
-                try:
-                    async with AsyncSessionLocal() as session:
-                        result = await session.execute(
-                            text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true")
-                        )
-                        user_count = result.scalar()
-                        candidates.append((worker, user_count))
-                except Exception as e:
-                    logger.error(f"Failed to count users for {key}: {e}")
-                    candidates.append((worker, 999))
-        
-        if not candidates:
-            return None
-        
-        candidates.sort(key=lambda x: x[1])
-        logger.info(f"⚖️ Selected {candidates[0][0]['bot_username']} ({candidates[0][1]} users)")
-        return candidates[0][0]
+    def get_user_bindings(self, head_user_id: int, bot_type: str = None) -> list:
+        result = []
+        for key, b in self._bindings.items():
+            if b["head_user_id"] == head_user_id:
+                if bot_type is None or b["bot_type"] == bot_type:
+                    result.append(b)
+        return result
     
-    async def get_user_projects(self, head_user_id: int) -> list:
-        """Возвращает список проектов пользователя из его клона"""
-        binding = self.get_user_binding(head_user_id)
-        if not binding:
-            return []
+    async def get_all_user_data(self, head_user_id: int) -> dict:
+        result = {}
         
-        prefix = f"tg{binding['clone_id']}_"
-        worker_user_id = binding["worker_user_id"]
-        
-        try:
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    text(f"""
-                        SELECT p.id, p.name, p.is_active,
-                               (SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id = p.id AND is_active = true) as sources,
-                               (SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id = p.id AND status = 'pending') as pending,
-                               (SELECT MAX(published_at) FROM {prefix}post_queue WHERE project_id = p.id AND status = 'published') as last_post,
-                               p.posts_posted_today
-                        FROM {prefix}projects p
-                        WHERE p.user_id = :uid AND p.is_active = true
-                        ORDER BY p.id
-                    """),
-                    {"uid": worker_user_id}
-                )
-                projects = []
-                for row in result.fetchall():
-                    status = "🟢"
-                    if row[5]:
-                        hours_since = (datetime.utcnow() - row[5]).total_seconds() / 3600
-                        if hours_since > 24:
-                            status = "🔴"
-                        elif hours_since > 6:
-                            status = "🟡"
-                    else:
-                        status = "⚪"
+        for key, b in self._bindings.items():
+            if b["head_user_id"] != head_user_id:
+                continue
+            
+            bot_type = b["bot_type"]
+            clone_id = b["clone_id"]
+            worker_user_id = b["worker_user_id"]
+            
+            worker_key = f"{bot_type}:{clone_id}"
+            worker = self._workers.get(worker_key)
+            if not worker:
+                continue
+            
+            prefix = worker["db_prefix"]
+            
+            try:
+                async with AsyncSessionLocal() as session:
+                    r_projects = await session.execute(
+                        text(f"SELECT COUNT(*) FROM {prefix}projects WHERE user_id = :uid AND is_active = true"),
+                        {"uid": worker_user_id}
+                    )
+                    projects = r_projects.scalar()
                     
-                    projects.append({
-                        "id": row[0],
-                        "name": row[1],
-                        "is_active": row[2],
-                        "sources": row[3] or 0,
-                        "pending": row[4] or 0,
-                        "last_post": row[5].strftime("%d.%m %H:%M") if row[5] else "нет данных",
-                        "posted_today": row[6] or 0,
-                        "status": status
-                    })
-                return projects
-        except Exception as e:
-            logger.error(f"Failed to get user projects: {e}")
-            return []
-    
-    async def get_user_stats(self, head_user_id: int) -> dict | None:
-        binding = self.get_user_binding(head_user_id)
-        if not binding:
-            return None
+                    r_sources = await session.execute(
+                        text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND is_active = true"),
+                        {"uid": worker_user_id}
+                    )
+                    sources = r_sources.scalar()
+                    
+                    r_pending = await session.execute(
+                        text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'pending'"),
+                        {"uid": worker_user_id}
+                    )
+                    pending = r_pending.scalar()
+                    
+                    today_date = date.today()
+                    r_posted = await session.execute(
+                        text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
+                        {"uid": worker_user_id, "today": today_date}
+                    )
+                    posted_today = r_posted.scalar()
+                    
+                    r_proj_list = await session.execute(
+                        text(f"""
+                            SELECT p.name,
+                                   (SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id = p.id AND is_active = true) as sources,
+                                   (SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id = p.id AND status = 'pending') as pending,
+                                   (SELECT MAX(published_at) FROM {prefix}post_queue WHERE project_id = p.id AND status = 'published') as last_post,
+                                   p.posts_posted_today
+                            FROM {prefix}projects p
+                            WHERE p.user_id = :uid AND p.is_active = true
+                            ORDER BY p.id
+                        """),
+                        {"uid": worker_user_id}
+                    )
+                    projects_list = []
+                    for row in r_proj_list.fetchall():
+                        status_icon = "🟢"
+                        if row[3]:
+                            hours_since = (datetime.utcnow() - row[3]).total_seconds() / 3600
+                            if hours_since > 24:
+                                status_icon = "🔴"
+                            elif hours_since > 6:
+                                status_icon = "🟡"
+                        else:
+                            status_icon = "⚪"
+                        
+                        projects_list.append({
+                            "name": row[0],
+                            "sources": row[1] or 0,
+                            "pending": row[2] or 0,
+                            "last_post": row[3].strftime("%d.%m %H:%M") if row[3] else "нет данных",
+                            "posted_today": row[4] or 0,
+                            "status": status_icon
+                        })
+                    
+                    result[bot_type] = {
+                        "bot_username": worker["bot_username"],
+                        "clone_id": clone_id,
+                        "projects": projects,
+                        "sources": sources,
+                        "pending": pending,
+                        "posted_today": posted_today,
+                        "projects_list": projects_list
+                    }
+            except Exception as e:
+                logger.error(f"Failed to get data for {bot_type}#{clone_id}: {e}")
         
-        prefix = f"tg{binding['clone_id']}_"
-        worker_user_id = binding["worker_user_id"]
-        
-        try:
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}users")
-                )
-                total_users = result.scalar()
-                
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true")
-                )
-                active_users = result.scalar()
-                
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}projects WHERE user_id = :uid AND is_active = true"),
-                    {"uid": worker_user_id}
-                )
-                projects = result.scalar()
-                
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true")
-                )
-                total_projects = result.scalar()
-                
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND is_active = true"),
-                    {"uid": worker_user_id}
-                )
-                sources = result.scalar()
-                
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE is_active = true")
-                )
-                total_sources = result.scalar()
-                
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'pending'"),
-                    {"uid": worker_user_id}
-                )
-                pending = result.scalar()
-                
-                today = date.today()
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"),
-                    {"today": today}
-                )
-                posted_today = result.scalar()
-                
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
-                    {"uid": worker_user_id, "today": today}
-                )
-                user_posted_today = result.scalar()
-                
-                return {
-                    "total_users": total_users,
-                    "active_users": active_users,
-                    "projects": projects,
-                    "total_projects": total_projects,
-                    "sources": sources,
-                    "total_sources": total_sources,
-                    "pending": pending,
-                    "posted_today": posted_today,
-                    "user_posted_today": user_posted_today,
-                    "clone_id": binding["clone_id"],
-                    "bot_type": binding["bot_type"]
-                }
-        except Exception as e:
-            logger.error(f"Failed to get stats: {e}")
-            return None
-    
-    async def get_all_stats(self, head_user_id: int) -> dict:
-        stats = {}
-        binding = self.get_user_binding(head_user_id)
-        if binding:
-            bot_stats = await self.get_user_stats(head_user_id)
-            if bot_stats:
-                stats[binding["bot_type"]] = bot_stats
-        return stats
+        return result
     
     async def get_admin_stats(self) -> dict:
         all_stats = {}
@@ -225,23 +161,23 @@ class WorkerRegistry:
             prefix = worker["db_prefix"]
             try:
                 async with AsyncSessionLocal() as session:
-                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}users"))
-                    total_users = result.scalar()
-                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true"))
-                    active_users = result.scalar()
+                    r1 = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}users"))
+                    total_users = r1.scalar()
+                    r2 = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true"))
+                    active_users = r2.scalar()
                     
-                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true"))
-                    total_projects = result.scalar()
+                    r3 = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true"))
+                    total_projects = r3.scalar()
                     
-                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE is_active = true"))
-                    total_sources = result.scalar()
+                    r4 = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE is_active = true"))
+                    total_sources = r4.scalar()
                     
-                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'pending'"))
-                    pending = result.scalar()
+                    r5 = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'pending'"))
+                    pending = r5.scalar()
                     
                     today = date.today()
-                    result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"), {"today": today})
-                    posted_today = result.scalar()
+                    r6 = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"), {"today": today})
+                    posted_today = r6.scalar()
                     
                     all_stats[key] = {
                         "bot_username": worker["bot_username"],
