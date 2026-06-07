@@ -34,7 +34,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def build_main_keyboard(user_id: int) -> list:
     keyboard = []
     
-    # TG2TG — показываем все клоны
+    # TG2TG — кнопки для перехода в бота
     tg2tg_workers = registry.get_workers_for_type("tg2tg")
     if tg2tg_workers:
         binding = registry.get_user_binding(user_id)
@@ -49,10 +49,6 @@ async def build_main_keyboard(user_id: int) -> list:
             keyboard.append([
                 InlineKeyboardButton(
                     label,
-                    callback_data=f"clone_tg2tg_{worker['clone_id']}"
-                ),
-                InlineKeyboardButton(
-                    "📲",
                     url=f"https://t.me/{worker['bot_username']}"
                 )
             ])
@@ -61,17 +57,13 @@ async def build_main_keyboard(user_id: int) -> list:
             InlineKeyboardButton("📡 TG2TG — Telegram→Telegram (нет клонов)", callback_data="noop")
         ])
     
-    # U2TG — показываем все клоны
+    # U2TG
     u2tg_workers = registry.get_workers_for_type("u2tg")
     if u2tg_workers:
         for worker in u2tg_workers:
             keyboard.append([
                 InlineKeyboardButton(
                     f"📺 U2TG (клон #{worker['clone_id']})",
-                    callback_data=f"clone_u2tg_{worker['clone_id']}"
-                ),
-                InlineKeyboardButton(
-                    "📲",
                     url=f"https://t.me/{worker['bot_username']}"
                 )
             ])
@@ -123,9 +115,16 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for bot_type, stats in all_stats.items():
                 clone_num = stats.get('clone_id', '?')
                 
+                # Находим ссылку на бота
+                worker_link = ""
+                for key, w in registry._workers.items():
+                    if w["bot_type"] == bot_type and w["clone_id"] == clone_num:
+                        worker_link = f"https://t.me/{w['bot_username']}"
+                        break
+                
                 if is_admin:
                     msg_text += (
-                        f"📡 <b>{bot_type.upper()}</b> (клон #{clone_num})\n"
+                        f"📡 <b><a href='{worker_link}'>{bot_type.upper()} (клон #{clone_num})</a></b>\n"
                         f"   👥 Пользователей: {stats.get('active_users', 0)} / {stats.get('total_users', 0)}\n"
                         f"   📁 Ваших проектов: {stats.get('projects', 0)} (всего: {stats.get('total_projects', 0)})\n"
                         f"   📥 Ваших источников: {stats.get('sources', 0)} (всего: {stats.get('total_sources', 0)})\n"
@@ -134,7 +133,7 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 else:
                     msg_text += (
-                        f"📡 <b>{bot_type.upper()}</b> (клон #{clone_num})\n"
+                        f"📡 <b><a href='{worker_link}'>{bot_type.upper()} (клон #{clone_num})</a></b>\n"
                         f"   📁 Проектов: {stats.get('projects', 0)}\n"
                         f"   📥 Источников: {stats.get('sources', 0)}\n"
                         f"   📬 В очереди: {stats.get('pending', 0)}\n"
@@ -145,10 +144,11 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if projects:
             msg_text += "<b>📁 Ваши проекты:</b>\n"
             for p in projects:
+                last_post_display = p['last_post'] if p['last_post'] != "нет данных" else "нет данных"
                 msg_text += (
                     f"{p['status']} <b>{p['name']}</b>\n"
                     f"   📥 {p['sources']} ист. | 📬 {p['pending']} в очереди\n"
-                    f"   📤 {p['posted_today']} сегодня | 🕐 {p['last_post']}\n\n"
+                    f"   📤 {p['posted_today']} сегодня | 🕐 {last_post_display}\n\n"
                 )
     else:
         workers_tg = registry.get_workers_for_type("tg2tg")
@@ -157,7 +157,7 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg_text = (
                 f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
                 f"Я — единый центр управления парсерами.\n\n"
-                f"Нажмите на сервис для статистики, на 📲 чтобы открыть бота.\n\n"
+                f"Нажмите на сервис ниже, чтобы открыть бота.\n\n"
                 f"/help — все команды"
             )
         else:
@@ -166,9 +166,9 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = await build_main_keyboard(user_id)
     
     if query:
-        await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML", disable_web_page_preview=True)
     else:
-        await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):

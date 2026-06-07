@@ -123,7 +123,7 @@ class WorkerRegistry:
                         "is_active": row[2],
                         "sources": row[3] or 0,
                         "pending": row[4] or 0,
-                        "last_post": row[5].strftime("%d.%m %H:%M") if row[5] else "никогда",
+                        "last_post": row[5].strftime("%d.%m %H:%M") if row[5] else "нет данных",
                         "posted_today": row[6] or 0,
                         "status": status
                     })
