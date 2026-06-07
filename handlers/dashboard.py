@@ -34,43 +34,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def build_main_keyboard(user_id: int) -> list:
     keyboard = []
     
-    # TG2TG
+    # TG2TG — показываем все клоны
     tg2tg_workers = registry.get_workers_for_type("tg2tg")
     if tg2tg_workers:
         binding = registry.get_user_binding(user_id)
-        if binding and binding["bot_type"] == "tg2tg":
-            clone_id = binding["clone_id"]
-            worker = None
-            for w in tg2tg_workers:
-                if w["clone_id"] == clone_id:
-                    worker = w
-                    break
-            if not worker:
-                worker = tg2tg_workers[0]
-        else:
-            worker = tg2tg_workers[0]
+        bound_clone_id = binding["clone_id"] if binding and binding["bot_type"] == "tg2tg" else None
         
-        keyboard.append([
-            InlineKeyboardButton(
-                f"📡 TG2TG (клон #{worker['clone_id']})",
-                url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
-            )
-        ])
+        for worker in tg2tg_workers:
+            is_bound = worker["clone_id"] == bound_clone_id
+            label = f"📡 TG2TG (клон #{worker['clone_id']})"
+            if is_bound:
+                label = f"✅ TG2TG (клон #{worker['clone_id']}) — ваш"
+            
+            keyboard.append([
+                InlineKeyboardButton(
+                    label,
+                    url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
+                )
+            ])
     else:
         keyboard.append([
             InlineKeyboardButton("📡 TG2TG — Telegram→Telegram (нет клонов)", callback_data="noop")
         ])
     
-    # U2TG
+    # U2TG — показываем все клоны
     u2tg_workers = registry.get_workers_for_type("u2tg")
     if u2tg_workers:
-        worker = u2tg_workers[0]
-        keyboard.append([
-            InlineKeyboardButton(
-                f"📺 U2TG (клон #{worker['clone_id']})",
-                url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
-            )
-        ])
+        for worker in u2tg_workers:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"📺 U2TG (клон #{worker['clone_id']})",
+                    url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
+                )
+            ])
     else:
         keyboard.append([
             InlineKeyboardButton("📺 U2TG — YouTube→Telegram (скоро)", callback_data="noop")
