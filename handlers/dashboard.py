@@ -161,27 +161,82 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     msg_text = "👑 <b>Админ-панель KontentFabrik</b>\n\n"
     
+    total_pending = 0
+    
     if all_stats:
         for key, stats in all_stats.items():
+            pending = stats.get('pending', 0)
+            total_pending += pending
+            
+            alert = " ⚠️" if pending > 100 else ""
             msg_text += (
-                f"📡 <b>{stats['bot_username']}</b> ({key})\n"
+                f"📡 <b>{stats['bot_username']}</b> ({key}){alert}\n"
                 f"   👥 Пользователей: {stats['active_users']} / {stats['total_users']}\n"
                 f"   📁 Проектов: {stats['total_projects']}\n"
                 f"   📥 Источников: {stats['total_sources']}\n"
-                f"   📬 В очереди: {stats['pending']}\n"
+                f"   📬 В очереди: {pending}\n"
                 f"   📤 Опубликовано сегодня: {stats['posted_today']}\n\n"
             )
     else:
         msg_text += "❌ Нет данных о клонах.\n"
     
     msg_text += f"<b>Всего клонов:</b> {len(all_stats)}\n"
+    msg_text += f"<b>Всего в очереди:</b> {total_pending}\n"
+    
+    if total_pending > 100:
+        msg_text += "\n⚠️ <b>Очередь переполнена!</b> Рекомендуется очистить зависшие посты.\n"
     
     keyboard = [
         [InlineKeyboardButton("🔄 Обновить", callback_data="admin")],
         [InlineKeyboardButton("👥 Пользователи и тарифы", callback_data="admin_users")],
         [InlineKeyboardButton("ℹ️ Инфо о тарифах", callback_data="admin_tariffs_info")],
+        [InlineKeyboardButton("🧹 Очистить зависшие посты", callback_data="admin_clear_stuck")],
         [InlineKeyboardButton("◀️ Назад", callback_data="show_stats")],
     ]
+    
+    if query:
+        await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    else:
+        await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+
+async def admin_clear_stuck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Очищает зависшие pending > 24 часов во всех клонах"""
+    query = update.callback_query
+    if query:
+        await query.answer("🧹 Очищаю зависшие посты...")
+    
+    user_id = update.effective_user.id
+    if user_id != Config.ADMIN_ID:
+        return
+    
+    total_cleared = 0
+    details = []
+    
+    for key, worker in registry._workers.items():
+        prefix = worker["db_prefix"]
+        try:
+            async with AsyncSessionLocal() as session:
+                from sqlalchemy import text as sql_text
+                result = await session.execute(
+                    sql_text(f"UPDATE {prefix}post_queue SET status = 'failed', error_message = 'Завис в очереди > 24 часов (админ)' WHERE status = 'pending' AND scheduled_time < NOW() - INTERVAL '24 hours'")
+                )
+                await session.commit()
+                cleared = result.rowcount
+                total_cleared += cleared
+                if cleared > 0:
+                    details.append(f"📡 {worker['bot_username']}: {cleared} постов")
+                logger.info(f"🧹 {worker['bot_username']}: cleared {cleared} stuck posts")
+        except Exception as e:
+            logger.error(f"Failed to clear stuck posts in {key}: {e}")
+            details.append(f"📡 {worker['bot_username']}: ошибка")
+    
+    msg_text = f"🧹 <b>Очистка зависших постов</b>\n\n"
+    if details:
+        msg_text += "\n".join(details) + "\n\n"
+    msg_text += f"✅ Всего очищено: <b>{total_cleared}</b> постов"
+    
+    keyboard = [[InlineKeyboardButton("◀️ Назад в админку", callback_data="admin")]]
     
     if query:
         await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
