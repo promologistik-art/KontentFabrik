@@ -100,7 +100,6 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
     
-    # Определяем тип и номер клона
     if data.startswith("clone_tg2tg_"):
         bot_type = "tg2tg"
         clone_id = int(data.replace("clone_tg2tg_", ""))
@@ -113,7 +112,6 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     is_admin = (user_id == Config.ADMIN_ID)
     
-    # Находим worker
     worker = None
     for key, w in registry._workers.items():
         if w["bot_type"] == bot_type and w["clone_id"] == clone_id:
@@ -124,7 +122,6 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Клон не найден")
         return
     
-    # Получаем статистику
     prefix = worker["db_prefix"]
     binding = registry.get_user_binding(user_id)
     
@@ -135,20 +132,19 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with AsyncSessionLocal() as session:
             from sqlalchemy import text as sql_text
             
-            # Статистика клона
-            result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true"))
+            result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true"))
             active_users = result.scalar()
             
-            result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true"))
+            result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true"))
             total_projects = result.scalar()
             
-            result = await session.execute(text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'pending'"))
+            result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'pending'"))
             pending = result.scalar()
             
-            today = datetime.utcnow().strftime("%Y-%m-%d")
+            today_str = datetime.utcnow().strftime("%Y-%m-%d")
             result = await session.execute(
-                text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"),
-                {"today": today}
+                sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"),
+                {"today": today_str}
             )
             posted_today = result.scalar()
             
@@ -159,31 +155,30 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📤 Опубликовано сегодня: {posted_today}\n\n"
             )
             
-            # Проекты пользователя если есть привязка
             if binding and binding["bot_type"] == bot_type and binding["clone_id"] == clone_id:
                 worker_user_id = binding["worker_user_id"]
                 
                 result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}projects WHERE user_id = :uid AND is_active = true"),
+                    sql_text(f"SELECT COUNT(*) FROM {prefix}projects WHERE user_id = :uid AND is_active = true"),
                     {"uid": worker_user_id}
                 )
                 user_projects = result.scalar()
                 
                 result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND is_active = true"),
+                    sql_text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND is_active = true"),
                     {"uid": worker_user_id}
                 )
                 user_sources = result.scalar()
                 
                 result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'pending'"),
+                    sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'pending'"),
                     {"uid": worker_user_id}
                 )
                 user_pending = result.scalar()
                 
                 result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
-                    {"uid": worker_user_id, "today": today}
+                    sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
+                    {"uid": worker_user_id, "today": today_str}
                 )
                 user_posted = result.scalar()
                 
@@ -195,9 +190,8 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📤 Опубликовано сегодня: {user_posted}\n\n"
                 )
                 
-                # Список проектов
                 result = await session.execute(
-                    text(f"""
+                    sql_text(f"""
                         SELECT p.name,
                                (SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id = p.id AND is_active = true) as sources,
                                (SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id = p.id AND status = 'pending') as pending,
