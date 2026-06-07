@@ -1,1 +1,1 @@
-from .dashboard import start, dashboard, refresh, debug, admin_panel, admin_users, admin_set_tariff, admin_tariffs_info, admin_clear_stuck, help_command, show_stats
+from .dashboard import start, dashboard, refresh, debug, admin_panel, admin_users, admin_set_tariff, admin_tariffs_info, admin_clear_stuck, help_command, show_stats, show_clone_info
