@@ -34,28 +34,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def build_main_keyboard(user_id: int) -> list:
     keyboard = []
     
-    has_tg2tg = bool(registry.get_workers_for_type("tg2tg"))
-    has_u2tg = bool(registry.get_workers_for_type("u2tg"))
-    
-    if has_tg2tg:
-        tg2tg_workers = registry.get_workers_for_type("tg2tg")
-        worker = tg2tg_workers[0]
+    # TG2TG — кнопка для каждого клона
+    tg2tg_workers = registry.get_workers_for_type("tg2tg")
+    if tg2tg_workers:
+        for worker in tg2tg_workers:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"📡 TG2TG (клон #{worker['clone_id']})",
+                    url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
+                )
+            ])
+    else:
         keyboard.append([
-            InlineKeyboardButton(
-                "📡 TG2TG — открыть бота",
-                url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
-            )
+            InlineKeyboardButton("📡 TG2TG — Telegram→Telegram (нет клонов)", callback_data="noop")
         ])
     
-    if has_u2tg:
-        u2tg_workers = registry.get_workers_for_type("u2tg")
-        worker = u2tg_workers[0]
+    # U2TG — кнопка для каждого клона
+    u2tg_workers = registry.get_workers_for_type("u2tg")
+    if u2tg_workers:
+        for worker in u2tg_workers:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"📺 U2TG (клон #{worker['clone_id']})",
+                    url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
+                )
+            ])
+    else:
         keyboard.append([
-            InlineKeyboardButton(
-                "📺 U2TG — открыть бота",
-                url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
-            )
+            InlineKeyboardButton("📺 U2TG — YouTube→Telegram (скоро)", callback_data="noop")
         ])
+    
+    # TG2VK
+    keyboard.append([InlineKeyboardButton("📱 TG2VK — Telegram→VK (скоро)", callback_data="noop")])
     
     keyboard.append([
         InlineKeyboardButton("🔄 Обновить", callback_data="refresh")
