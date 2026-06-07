@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, date as dt_date
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -34,7 +34,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def build_main_keyboard(user_id: int) -> list:
     keyboard = []
     
-    # TG2TG — кнопки переключения между клонами
     tg2tg_workers = registry.get_workers_for_type("tg2tg")
     if tg2tg_workers:
         binding = registry.get_user_binding(user_id)
@@ -57,7 +56,6 @@ async def build_main_keyboard(user_id: int) -> list:
             InlineKeyboardButton("📡 TG2TG — Telegram→Telegram (нет клонов)", callback_data="noop")
         ])
     
-    # U2TG
     u2tg_workers = registry.get_workers_for_type("u2tg")
     if u2tg_workers:
         for worker in u2tg_workers:
@@ -72,7 +70,6 @@ async def build_main_keyboard(user_id: int) -> list:
             InlineKeyboardButton("📺 U2TG — YouTube→Telegram (скоро)", callback_data="noop")
         ])
     
-    # TG2VK
     keyboard.append([InlineKeyboardButton("📱 TG2VK — Telegram→VK (скоро)", callback_data="noop")])
     
     keyboard.append([
@@ -93,7 +90,6 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает информацию по конкретному клону"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -141,10 +137,10 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'pending'"))
             pending = result.scalar()
             
-            today_str = datetime.utcnow().strftime("%Y-%m-%d")
+            today_date = dt_date.today()
             result = await session.execute(
                 sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"),
-                {"today": today_str}
+                {"today": today_date}
             )
             posted_today = result.scalar()
             
@@ -178,7 +174,7 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 result = await session.execute(
                     sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
-                    {"uid": worker_user_id, "today": today_str}
+                    {"uid": worker_user_id, "today": today_date}
                 )
                 user_posted = result.scalar()
                 
@@ -240,7 +236,6 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает общую статистику по всем клонам"""
     query = update.callback_query
     if query:
         await query.answer()
