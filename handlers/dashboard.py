@@ -34,7 +34,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def build_main_keyboard(user_id: int) -> list:
     keyboard = []
     
-    # TG2TG — кнопка для каждого клона
     tg2tg_workers = registry.get_workers_for_type("tg2tg")
     if tg2tg_workers:
         for worker in tg2tg_workers:
@@ -49,7 +48,6 @@ async def build_main_keyboard(user_id: int) -> list:
             InlineKeyboardButton("📡 TG2TG — Telegram→Telegram (нет клонов)", callback_data="noop")
         ])
     
-    # U2TG — кнопка для каждого клона
     u2tg_workers = registry.get_workers_for_type("u2tg")
     if u2tg_workers:
         for worker in u2tg_workers:
@@ -64,7 +62,6 @@ async def build_main_keyboard(user_id: int) -> list:
             InlineKeyboardButton("📺 U2TG — YouTube→Telegram (скоро)", callback_data="noop")
         ])
     
-    # TG2VK
     keyboard.append([InlineKeyboardButton("📱 TG2VK — Telegram→VK (скоро)", callback_data="noop")])
     
     keyboard.append([
@@ -115,7 +112,7 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for p in data['projects_list']:
                     msg_text += (
                         f"{p['status']} <b>{p['name']}</b>\n"
-                        f"   📥 {p['sources']} ист. | 📬 {p['pending']} в очереди | 📤 {p['posted_today']} сегодня | 🕐 {p['last_post']}\n"
+                        f"   📥 {p['sources']} ист. | 📬 {p['pending']} в очереди | 📤 {p['posted_today']} сегодня | Последний пост: {p['last_post']} МСК\n"
                     )
                 msg_text += "\n"
     else:

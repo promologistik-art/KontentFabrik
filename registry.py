@@ -1,6 +1,6 @@
 """Реестр ботов-исполнителей — PostgreSQL"""
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from sqlalchemy import select, text
 from database import AsyncSessionLocal
 from models import Worker, UserBinding
@@ -124,6 +124,7 @@ class WorkerRegistry:
                     for row in r_proj_list.fetchall():
                         status_icon = "🟢"
                         if row[3]:
+                            last_post_msk = row[3] + timedelta(hours=3)
                             hours_since = (datetime.utcnow() - row[3]).total_seconds() / 3600
                             if hours_since > 24:
                                 status_icon = "🔴"
@@ -131,12 +132,13 @@ class WorkerRegistry:
                                 status_icon = "🟡"
                         else:
                             status_icon = "⚪"
+                            last_post_msk = None
                         
                         projects_list.append({
                             "name": row[0],
                             "sources": row[1] or 0,
                             "pending": row[2] or 0,
-                            "last_post": row[3].strftime("%d.%m %H:%M") if row[3] else "нет данных",
+                            "last_post": last_post_msk.strftime("%d.%m %H:%M") if last_post_msk else "нет данных",
                             "posted_today": row[4] or 0,
                             "status": status_icon
                         })
