@@ -1,6 +1,6 @@
 """Реестр ботов-исполнителей — PostgreSQL"""
 import logging
-from datetime import date
+from datetime import date, datetime
 from sqlalchemy import select, text
 from database import AsyncSessionLocal
 from models import Worker, UserBinding
@@ -59,7 +59,6 @@ class WorkerRegistry:
         return self._bindings.get(str(head_user_id))
     
     async def get_least_loaded_worker(self, bot_type: str) -> dict | None:
-        """Выбирает клона с наименьшим числом активных пользователей"""
         candidates = []
         for key, worker in self._workers.items():
             if worker["bot_type"] == bot_type:
@@ -82,6 +81,57 @@ class WorkerRegistry:
         logger.info(f"⚖️ Selected {candidates[0][0]['bot_username']} ({candidates[0][1]} users)")
         return candidates[0][0]
     
+    async def get_user_projects(self, head_user_id: int) -> list:
+        """Возвращает список проектов пользователя из его клона"""
+        binding = self.get_user_binding(head_user_id)
+        if not binding:
+            return []
+        
+        prefix = f"tg{binding['clone_id']}_"
+        worker_user_id = binding["worker_user_id"]
+        
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    text(f"""
+                        SELECT p.id, p.name, p.is_active,
+                               (SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id = p.id AND is_active = true) as sources,
+                               (SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id = p.id AND status = 'pending') as pending,
+                               (SELECT MAX(published_at) FROM {prefix}post_queue WHERE project_id = p.id AND status = 'published') as last_post,
+                               p.posts_posted_today
+                        FROM {prefix}projects p
+                        WHERE p.user_id = :uid AND p.is_active = true
+                        ORDER BY p.id
+                    """),
+                    {"uid": worker_user_id}
+                )
+                projects = []
+                for row in result.fetchall():
+                    status = "🟢"
+                    if row[5]:
+                        hours_since = (datetime.utcnow() - row[5]).total_seconds() / 3600
+                        if hours_since > 24:
+                            status = "🔴"
+                        elif hours_since > 6:
+                            status = "🟡"
+                    else:
+                        status = "⚪"
+                    
+                    projects.append({
+                        "id": row[0],
+                        "name": row[1],
+                        "is_active": row[2],
+                        "sources": row[3] or 0,
+                        "pending": row[4] or 0,
+                        "last_post": row[5].strftime("%d.%m %H:%M") if row[5] else "никогда",
+                        "posted_today": row[6] or 0,
+                        "status": status
+                    })
+                return projects
+        except Exception as e:
+            logger.error(f"Failed to get user projects: {e}")
+            return []
+    
     async def get_user_stats(self, head_user_id: int) -> dict | None:
         binding = self.get_user_binding(head_user_id)
         if not binding:
@@ -92,52 +142,44 @@ class WorkerRegistry:
         
         try:
             async with AsyncSessionLocal() as session:
-                # Всего пользователей
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}users")
                 )
                 total_users = result.scalar()
                 
-                # Активных
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true")
                 )
                 active_users = result.scalar()
                 
-                # Проекты пользователя
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}projects WHERE user_id = :uid AND is_active = true"),
                     {"uid": worker_user_id}
                 )
                 projects = result.scalar()
                 
-                # Всего проектов
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true")
                 )
                 total_projects = result.scalar()
                 
-                # Источники пользователя
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND is_active = true"),
                     {"uid": worker_user_id}
                 )
                 sources = result.scalar()
                 
-                # Всего источников
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}source_channels WHERE is_active = true")
                 )
                 total_sources = result.scalar()
                 
-                # В очереди
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'pending'"),
                     {"uid": worker_user_id}
                 )
                 pending = result.scalar()
                 
-                # Опубликовано сегодня (всего)
                 today = date.today()
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"),
@@ -145,7 +187,6 @@ class WorkerRegistry:
                 )
                 posted_today = result.scalar()
                 
-                # Опубликовано пользователем сегодня
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE project_id IN (SELECT id FROM {prefix}projects WHERE user_id = :uid) AND status = 'published' AND published_at >= :today"),
                     {"uid": worker_user_id, "today": today}
@@ -179,7 +220,6 @@ class WorkerRegistry:
         return stats
     
     async def get_admin_stats(self) -> dict:
-        """Статистика по всем клонам для админа"""
         all_stats = {}
         for key, worker in self._workers.items():
             prefix = worker["db_prefix"]

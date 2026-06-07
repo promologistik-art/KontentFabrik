@@ -49,7 +49,11 @@ async def build_main_keyboard(user_id: int) -> list:
             keyboard.append([
                 InlineKeyboardButton(
                     label,
-                    url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
+                    callback_data=f"clone_tg2tg_{worker['clone_id']}"
+                ),
+                InlineKeyboardButton(
+                    "📲",
+                    url=f"https://t.me/{worker['bot_username']}"
                 )
             ])
     else:
@@ -64,7 +68,11 @@ async def build_main_keyboard(user_id: int) -> list:
             keyboard.append([
                 InlineKeyboardButton(
                     f"📺 U2TG (клон #{worker['clone_id']})",
-                    url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
+                    callback_data=f"clone_u2tg_{worker['clone_id']}"
+                ),
+                InlineKeyboardButton(
+                    "📲",
+                    url=f"https://t.me/{worker['bot_username']}"
                 )
             ])
     else:
@@ -98,24 +106,50 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
     
     user_id = update.effective_user.id
+    is_admin = (user_id == Config.ADMIN_ID)
     await registry.reload()
     
     all_stats = await registry.get_all_stats(user_id)
+    projects = await registry.get_user_projects(user_id)
     
     msk_tz = pytz.timezone(Config.TIMEZONE)
     now_msk = datetime.now(msk_tz).strftime("%H:%M")
     
-    if all_stats:
+    if all_stats or projects:
         msg_text = f"📊 <b>Ваш дашборд</b>  <i>обновлено в {now_msk} МСК</i>\n\n"
-        for bot_type, stats in all_stats.items():
-            msg_text += (
-                f"📡 <b>{bot_type.upper()}</b> (клон #{stats.get('clone_id', '?')})\n"
-                f"   👥 Пользователей: {stats.get('active_users', 0)} / {stats.get('total_users', 0)}\n"
-                f"   📁 Ваших проектов: {stats.get('projects', 0)} (всего: {stats.get('total_projects', 0)})\n"
-                f"   📥 Ваших источников: {stats.get('sources', 0)} (всего: {stats.get('total_sources', 0)})\n"
-                f"   📬 В очереди: {stats.get('pending', 0)}\n"
-                f"   📤 Опубликовано сегодня: {stats.get('posted_today', 0)} (ваших: {stats.get('user_posted_today', 0)})\n\n"
-            )
+        
+        # Статистика
+        if all_stats:
+            for bot_type, stats in all_stats.items():
+                clone_num = stats.get('clone_id', '?')
+                
+                if is_admin:
+                    msg_text += (
+                        f"📡 <b>{bot_type.upper()}</b> (клон #{clone_num})\n"
+                        f"   👥 Пользователей: {stats.get('active_users', 0)} / {stats.get('total_users', 0)}\n"
+                        f"   📁 Ваших проектов: {stats.get('projects', 0)} (всего: {stats.get('total_projects', 0)})\n"
+                        f"   📥 Ваших источников: {stats.get('sources', 0)} (всего: {stats.get('total_sources', 0)})\n"
+                        f"   📬 В очереди: {stats.get('pending', 0)}\n"
+                        f"   📤 Опубликовано сегодня: {stats.get('posted_today', 0)} (ваших: {stats.get('user_posted_today', 0)})\n\n"
+                    )
+                else:
+                    msg_text += (
+                        f"📡 <b>{bot_type.upper()}</b> (клон #{clone_num})\n"
+                        f"   📁 Проектов: {stats.get('projects', 0)}\n"
+                        f"   📥 Источников: {stats.get('sources', 0)}\n"
+                        f"   📬 В очереди: {stats.get('pending', 0)}\n"
+                        f"   📤 Опубликовано сегодня: {stats.get('user_posted_today', 0)}\n\n"
+                    )
+        
+        # Список проектов
+        if projects:
+            msg_text += "<b>📁 Ваши проекты:</b>\n"
+            for p in projects:
+                msg_text += (
+                    f"{p['status']} <b>{p['name']}</b>\n"
+                    f"   📥 {p['sources']} ист. | 📬 {p['pending']} в очереди\n"
+                    f"   📤 {p['posted_today']} сегодня | 🕐 {p['last_post']}\n\n"
+                )
     else:
         workers_tg = registry.get_workers_for_type("tg2tg")
         workers_yt = registry.get_workers_for_type("u2tg")
@@ -123,15 +157,11 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg_text = (
                 f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
                 f"Я — единый центр управления парсерами.\n\n"
-                f"📡 <b>TG2TG</b> — парсинг Telegram → постинг в Telegram\n"
-                f"📺 <b>U2TG</b> — парсинг YouTube → постинг в Telegram\n"
-                f"📱 <b>TG2VK</b> — Telegram → VK (скоро)\n\n"
-                f"Нажмите кнопку ниже, чтобы перейти в нужный сервис.\n"
-                f"Затем вернитесь сюда и нажмите «Статистика».\n\n"
+                f"Нажмите на сервис для статистики, на 📲 чтобы открыть бота.\n\n"
                 f"/help — все команды"
             )
         else:
-            msg_text = f"❌ Нет доступных клонов. <i>обновлено в {now_msk} МСК</i>\n\n📺 U2TG: скоро\n📱 TG2VK: скоро"
+            msg_text = f"❌ Нет доступных клонов.\n\n📺 U2TG: скоро\n📱 TG2VK: скоро"
     
     keyboard = await build_main_keyboard(user_id)
     
@@ -197,7 +227,6 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def admin_clear_stuck(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Очищает зависшие pending > 24 часов во всех клонах"""
     query = update.callback_query
     if query:
         await query.answer("🧹 Очищаю зависшие посты...")
