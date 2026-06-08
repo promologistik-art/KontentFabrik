@@ -38,6 +38,7 @@ async def main():
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("debug", debug))
     app.add_handler(CallbackQueryHandler(show_clone_info, pattern="^clone_"))
+    app.add_handler(CallbackQueryHandler(help_command, pattern="^help_cmd$"))
     app.add_handler(CallbackQueryHandler(refresh, pattern="^refresh$"))
     app.add_handler(CallbackQueryHandler(admin_panel, pattern="^admin$"))
     app.add_handler(CallbackQueryHandler(admin_users, pattern="^admin_users$"))
@@ -45,7 +46,6 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_clear_stuck, pattern="^admin_clear_stuck$"))
     app.add_handler(CallbackQueryHandler(admin_set_tariff, pattern="^tariff_"))
     
-    # Scheduler для ежедневного отчёта
     report_scheduler = ReportScheduler()
     report_task = asyncio.create_task(report_scheduler.start())
     

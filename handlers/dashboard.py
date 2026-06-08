@@ -10,6 +10,21 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
+SUPPORT_LINK = f"https://t.me/{Config.ADMIN_USERNAME or 'admin'}"
+SUPPORT_TEXT = f"📲 <a href='{SUPPORT_LINK}'>Написать в поддержку</a>"
+
+BOT_LABELS = {
+    "tg2tg": "Telegram → Telegram",
+    "u2tg": "YouTube → Telegram",
+    "tg2vk": "Telegram → VK"
+}
+
+BOT_EMOJI = {
+    "tg2tg": "📡",
+    "u2tg": "📺",
+    "tg2vk": "📱"
+}
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -28,13 +43,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ))
             await session.commit()
     
-    await show_stats(update, context)
+    await registry.reload()
+    user_data = await registry.get_all_user_data(user.id)
+    
+    if user_data:
+        await show_stats(update, context)
+    else:
+        await show_welcome(update, context)
+
+
+async def show_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    
+    msg_text = (
+        f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
+        f"Я — единый центр управления парсерами контента.\n\n"
+        f"📡 <b>Telegram → Telegram</b> — парсинг каналов и постинг в Telegram\n"
+        f"📺 <b>YouTube → Telegram</b> — парсинг YouTube и постинг в Telegram\n"
+        f"📱 <b>Telegram → VK</b> — парсинг Telegram и постинг в VK (скоро)\n\n"
+        f"<b>🔹 Как начать:</b>\n"
+        f"1. Нажмите на кнопку парсера ниже — увидите статистику\n"
+        f"2. В статистике нажмите <b>«Открыть бота»</b> — перейдёте в парсер\n"
+        f"3. В парсере нажмите /start и следуйте инструкциям\n"
+        f"4. Вернитесь сюда и нажмите <b>«🔄 Обновить»</b>\n"
+        f"5. Готово! Ваши проекты появятся в дашборде\n\n"
+        f"{SUPPORT_TEXT}"
+    )
+    
+    keyboard = await build_main_keyboard(user.id)
+    
+    if query:
+        await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML", disable_web_page_preview=True)
+    else:
+        await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def build_main_keyboard(user_id: int) -> list:
     keyboard = []
     
-    # Кнопки переключения между клонами
     all_workers = []
     for bot_type in ["tg2tg", "u2tg"]:
         workers = registry.get_workers_for_type(bot_type)
@@ -43,23 +89,25 @@ async def build_main_keyboard(user_id: int) -> list:
     
     for worker in all_workers:
         bot_type = worker["bot_type"]
-        emoji = "📡" if bot_type == "tg2tg" else "📺"
+        emoji = BOT_EMOJI.get(bot_type, "📡")
+        label = BOT_LABELS.get(bot_type, bot_type)
         keyboard.append([
             InlineKeyboardButton(
-                f"{emoji} {worker['bot_username']} (клон #{worker['clone_id']})",
+                f"{emoji} {label} — парсер #{worker['clone_id']}",
                 callback_data=f"clone_{bot_type}_{worker['clone_id']}"
             )
         ])
     
     if not all_workers:
         keyboard.append([
-            InlineKeyboardButton("📡 TG2TG — нет клонов", callback_data="noop")
+            InlineKeyboardButton("📡 Telegram → Telegram — нет парсеров", callback_data="noop")
         ])
     
-    keyboard.append([InlineKeyboardButton("📱 TG2VK — Telegram→VK (скоро)", callback_data="noop")])
+    keyboard.append([InlineKeyboardButton("📱 Telegram → VK (скоро)", callback_data="noop")])
     
     keyboard.append([
-        InlineKeyboardButton("🔄 Обновить", callback_data="refresh")
+        InlineKeyboardButton("🔄 Обновить", callback_data="refresh"),
+        InlineKeyboardButton("📋 Помощь", callback_data="help_cmd")
     ])
     
     if user_id == Config.ADMIN_ID:
@@ -75,7 +123,6 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает статистику по конкретному клону"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -91,7 +138,6 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await registry.reload()
     
-    # Ищем worker
     worker = None
     for key, w in registry._workers.items():
         if w["bot_type"] == bot_type and w["clone_id"] == clone_id:
@@ -99,7 +145,7 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break
     
     if not worker:
-        await query.edit_message_text("❌ Клон не найден")
+        await query.edit_message_text("❌ Парсер не найден")
         return
     
     prefix = worker["db_prefix"]
@@ -109,9 +155,10 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now_msk = datetime.now(msk_tz).strftime("%H:%M")
     
     bot_data = user_data.get(bot_type)
+    label = BOT_LABELS.get(bot_type, bot_type)
     
-    msg_text = f"📊 <b>{worker['bot_username']}</b> (клон #{clone_id})  <i>обновлено в {now_msk} МСК</i>\n"
-    msg_text += f"🔗 <a href='https://t.me/{worker['bot_username']}?start=kf_{user_id}'>Открыть бота</a>\n\n"
+    msg_text = f"📊 <b>{label}</b> (парсер #{clone_id})  <i>обновлено в {now_msk} МСК</i>\n"
+    msg_text += f"🔗 <a href='https://t.me/{worker['bot_username']}?start=kf_{user_id}'>Открыть бота</a> — перейдите чтобы создать проекты\n\n"
     
     try:
         async with AsyncSessionLocal() as session:
@@ -158,17 +205,18 @@ async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             f"   📥 {p['sources']} ист. | 📬 {p['pending']} в очереди | 📤 {p['posted_today']} сегодня | Последний пост: {p['last_post']} МСК\n"
                         )
             else:
-                msg_text += "⚠️ Вы не привязаны к этому клону. Нажмите «Открыть бота» и нажмите /start.\n"
+                msg_text += "⚠️ Вы не привязаны к этому парсеру. Нажмите «Открыть бота» выше и нажмите /start.\n"
     except Exception as e:
         logger.error(f"Failed to get clone info: {e}")
         msg_text += "❌ Ошибка загрузки данных"
+    
+    msg_text += f"\n{SUPPORT_TEXT}"
     
     keyboard = await build_main_keyboard(user_id)
     await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает общую статистику по всем клонам пользователя"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -191,8 +239,9 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         for bot_type, data in user_data.items():
             bot_link = f"https://t.me/{data['bot_username']}?start=kf_{user_id}"
+            label = BOT_LABELS.get(bot_type, bot_type)
             msg_text += (
-                f"📡 <b><a href='{bot_link}'>{bot_type.upper()}</a></b> (клон #{data['clone_id']})\n"
+                f"📡 <b><a href='{bot_link}'>{label}</a></b> (парсер #{data['clone_id']})\n"
                 f"   📁 Проектов: {data['projects']} | 📥 Источников: {data['sources']} | 📬 В очереди: {data['pending']} | 📤 Сегодня: {data['posted_today']}\n\n"
             )
             
@@ -205,19 +254,17 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<b>Итого:</b> 📁 {total_projects} проектов | 📥 {total_sources} источников | 📬 {total_pending} в очереди | 📤 {total_posted} сегодня\n\n"
         )
         
-        msg_text += "Нажмите на клон ниже для подробной информации.\n"
+        msg_text += "Нажмите на парсер ниже для подробной информации.\n"
+        msg_text += f"{SUPPORT_TEXT}"
     else:
-        has_any = bool(registry.get_workers_for_type("tg2tg")) or bool(registry.get_workers_for_type("u2tg"))
-        if has_any:
-            msg_text = (
-                f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
-                f"Я — единый центр управления парсерами.\n\n"
-                f"Нажмите на клон ниже для подробностей.\n"
-                f"Ссылка в тексте откроет бота.\n\n"
-                f"/help — все команды"
-            )
-        else:
-            msg_text = f"❌ Нет доступных клонов.\n\n📺 U2TG: скоро\n📱 TG2VK: скоро"
+        msg_text = (
+            f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
+            f"Я — единый центр управления парсерами.\n\n"
+            f"Нажмите на парсер ниже для подробностей.\n"
+            f"Ссылка в тексте откроет бота.\n\n"
+            f"/help — все команды\n"
+            f"{SUPPORT_TEXT}"
+        )
     
     keyboard = await build_main_keyboard(user_id)
     
@@ -260,9 +307,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"   📤 Опубликовано сегодня: {stats['posted_today']}\n\n"
             )
     else:
-        msg_text += "❌ Нет данных о клонах.\n"
+        msg_text += "❌ Нет данных о парсерах.\n"
     
-    msg_text += f"<b>Всего клонов:</b> {len(all_stats)}\n"
+    msg_text += f"<b>Всего парсеров:</b> {len(all_stats)}\n"
     msg_text += f"<b>Всего в очереди:</b> {total_pending}\n"
     
     if total_pending > 100:
@@ -370,12 +417,6 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await registry.reload()
     
-    bot_labels = {
-        "tg2tg": "из Telegram в Telegram",
-        "u2tg": "из YouTube в Telegram",
-        "tg2vk": "из Telegram в VK"
-    }
-    
     result_text = (
         "👥 <b>Пользователи</b>\n"
         "🎁Trial 💳Basic 💎Standard 👑PRO ♾️Unlimited\n\n"
@@ -384,7 +425,7 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     for key, worker in registry._workers.items():
         prefix = worker["db_prefix"]
-        label = bot_labels.get(worker['bot_type'], worker['bot_type'])
+        label = BOT_LABELS.get(worker['bot_type'], worker['bot_type'])
         try:
             async with AsyncSessionLocal() as session:
                 from sqlalchemy import text as sql_text
@@ -525,24 +566,25 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_text = (
         "📚 <b>KontentFabrik — Справка</b>\n\n"
         "Я управляю всеми парсерами из одного места.\n\n"
-        "<b>📡 Доступные сервисы:</b>\n"
-        "• TG2TG — парсинг Telegram-каналов и постинг в Telegram\n"
-        "• U2TG — парсинг YouTube и постинг в Telegram\n"
-        "• TG2VK — парсинг Telegram и постинг в VK (скоро)\n\n"
-        "<b>Команды:</b>\n"
+        "<b>📡 Сервисы:</b>\n"
+        "• Telegram → Telegram — парсинг каналов и постинг в Telegram\n"
+        "• YouTube → Telegram — парсинг YouTube и постинг в Telegram\n"
+        "• Telegram → VK — Telegram → VK (скоро)\n\n"
+        "<b>🔹 Как работать:</b>\n"
+        "1. Нажмите кнопку парсера — увидите статистику\n"
+        "2. Нажмите <b>«Открыть бота»</b> — перейдёте в парсер\n"
+        "3. Там нажмите /start и создайте проекты\n"
+        "4. Вернитесь сюда → «Обновить» → статистика готова\n\n"
+        "<b>📋 Команды:</b>\n"
         "/start — дашборд\n"
-        "/dashboard — статистика\n"
         "/help — справка\n"
     )
     
     if user_id == Config.ADMIN_ID:
-        msg_text += (
-            "\n<b>👑 Админ:</b>\n"
-            "/admin — админ-панель\n"
-        )
+        msg_text += "\n<b>👑 Админ:</b>\n/admin — админ-панель\n"
     
     msg_text += (
-        f"\n📲 <a href='https://t.me/{Config.ADMIN_USERNAME or 'admin'}'>Написать админу</a>"
+        f"\n{SUPPORT_TEXT}"
         f"\n📢 <a href='https://t.me/+MAuGbcnBQmgxZTIy'>Больше ботов в канале</a>"
     )
     
