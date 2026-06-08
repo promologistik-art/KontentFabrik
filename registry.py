@@ -188,7 +188,8 @@ class WorkerRegistry:
                         "total_projects": total_projects,
                         "total_sources": total_sources,
                         "pending": pending,
-                        "posted_today": posted_today
+                        "posted_today": posted_today,
+                        "_prefix": prefix
                     }
             except Exception as e:
                 logger.error(f"Admin stats failed for {key}: {e}")

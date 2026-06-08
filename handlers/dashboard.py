@@ -34,32 +34,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def build_main_keyboard(user_id: int) -> list:
     keyboard = []
     
-    tg2tg_workers = registry.get_workers_for_type("tg2tg")
-    if tg2tg_workers:
-        for worker in tg2tg_workers:
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"📡 TG2TG (клон #{worker['clone_id']})",
-                    url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
-                )
-            ])
-    else:
+    # Кнопки переключения между клонами
+    all_workers = []
+    for bot_type in ["tg2tg", "u2tg"]:
+        workers = registry.get_workers_for_type(bot_type)
+        for w in workers:
+            all_workers.append(w)
+    
+    for worker in all_workers:
+        bot_type = worker["bot_type"]
+        emoji = "📡" if bot_type == "tg2tg" else "📺"
         keyboard.append([
-            InlineKeyboardButton("📡 TG2TG — Telegram→Telegram (нет клонов)", callback_data="noop")
+            InlineKeyboardButton(
+                f"{emoji} {worker['bot_username']} (клон #{worker['clone_id']})",
+                callback_data=f"clone_{bot_type}_{worker['clone_id']}"
+            )
         ])
     
-    u2tg_workers = registry.get_workers_for_type("u2tg")
-    if u2tg_workers:
-        for worker in u2tg_workers:
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"📺 U2TG (клон #{worker['clone_id']})",
-                    url=f"https://t.me/{worker['bot_username']}?start=kf_{user_id}"
-                )
-            ])
-    else:
+    if not all_workers:
         keyboard.append([
-            InlineKeyboardButton("📺 U2TG — YouTube→Telegram (скоро)", callback_data="noop")
+            InlineKeyboardButton("📡 TG2TG — нет клонов", callback_data="noop")
         ])
     
     keyboard.append([InlineKeyboardButton("📱 TG2VK — Telegram→VK (скоро)", callback_data="noop")])
@@ -80,13 +74,106 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_stats(update, context)
 
 
+async def show_clone_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает статистику по конкретному клону"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    data = query.data
+    parts = data.split("_")
+    if len(parts) < 3:
+        return
+    
+    bot_type = parts[1]
+    clone_id = int(parts[2])
+    
+    user_id = update.effective_user.id
+    await registry.reload()
+    
+    # Ищем worker
+    worker = None
+    for key, w in registry._workers.items():
+        if w["bot_type"] == bot_type and w["clone_id"] == clone_id:
+            worker = w
+            break
+    
+    if not worker:
+        await query.edit_message_text("❌ Клон не найден")
+        return
+    
+    prefix = worker["db_prefix"]
+    user_data = await registry.get_all_user_data(user_id)
+    
+    msk_tz = pytz.timezone(Config.TIMEZONE)
+    now_msk = datetime.now(msk_tz).strftime("%H:%M")
+    
+    bot_data = user_data.get(bot_type)
+    
+    msg_text = f"📊 <b>{worker['bot_username']}</b> (клон #{clone_id})  <i>обновлено в {now_msk} МСК</i>\n"
+    msg_text += f"🔗 <a href='https://t.me/{worker['bot_username']}?start=kf_{user_id}'>Открыть бота</a>\n\n"
+    
+    try:
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import text as sql_text
+            from datetime import date as dt_date
+            
+            result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}users WHERE is_active = true"))
+            active_users = result.scalar()
+            
+            result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}projects WHERE is_active = true"))
+            total_projects = result.scalar()
+            
+            result = await session.execute(sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'pending'"))
+            pending = result.scalar()
+            
+            today_date = dt_date.today()
+            result = await session.execute(
+                sql_text(f"SELECT COUNT(*) FROM {prefix}post_queue WHERE status = 'published' AND published_at >= :today"),
+                {"today": today_date}
+            )
+            posted_today = result.scalar()
+            
+            msg_text += (
+                f"👥 Пользователей: {active_users}\n"
+                f"📁 Всего проектов: {total_projects}\n"
+                f"📬 В очереди: {pending}\n"
+                f"📤 Опубликовано сегодня: {posted_today}\n\n"
+            )
+            
+            if bot_data:
+                msg_text += (
+                    f"<b>Ваши данные:</b>\n"
+                    f"📁 Проектов: {bot_data['projects']}\n"
+                    f"📥 Источников: {bot_data['sources']}\n"
+                    f"📬 В очереди: {bot_data['pending']}\n"
+                    f"📤 Опубликовано сегодня: {bot_data['posted_today']}\n\n"
+                )
+                
+                if bot_data['projects_list']:
+                    msg_text += "<b>📁 Проекты:</b>\n"
+                    for p in bot_data['projects_list']:
+                        msg_text += (
+                            f"{p['status']} <b>{p['name']}</b>\n"
+                            f"   📥 {p['sources']} ист. | 📬 {p['pending']} в очереди | 📤 {p['posted_today']} сегодня | Последний пост: {p['last_post']} МСК\n"
+                        )
+            else:
+                msg_text += "⚠️ Вы не привязаны к этому клону. Нажмите «Открыть бота» и нажмите /start.\n"
+    except Exception as e:
+        logger.error(f"Failed to get clone info: {e}")
+        msg_text += "❌ Ошибка загрузки данных"
+    
+    keyboard = await build_main_keyboard(user_id)
+    await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML", disable_web_page_preview=True)
+
+
 async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает общую статистику по всем клонам пользователя"""
     query = update.callback_query
     if query:
         await query.answer()
     
     user_id = update.effective_user.id
-    is_admin = (user_id == Config.ADMIN_ID)
     await registry.reload()
     
     user_data = await registry.get_all_user_data(user_id)
@@ -95,34 +182,38 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now_msk = datetime.now(msk_tz).strftime("%H:%M")
     
     if user_data:
-        msg_text = f"📊 <b>Ваш дашборд</b>  <i>обновлено в {now_msk} МСК</i>\n\n"
+        msg_text = f"📊 <b>Общая статистика</b>  <i>обновлено в {now_msk} МСК</i>\n\n"
+        
+        total_projects = 0
+        total_sources = 0
+        total_pending = 0
+        total_posted = 0
         
         for bot_type, data in user_data.items():
             bot_link = f"https://t.me/{data['bot_username']}?start=kf_{user_id}"
             msg_text += (
                 f"📡 <b><a href='{bot_link}'>{bot_type.upper()}</a></b> (клон #{data['clone_id']})\n"
-                f"   📁 Проектов: {data['projects']}\n"
-                f"   📥 Источников: {data['sources']}\n"
-                f"   📬 В очереди: {data['pending']}\n"
-                f"   📤 Опубликовано сегодня: {data['posted_today']}\n\n"
+                f"   📁 Проектов: {data['projects']} | 📥 Источников: {data['sources']} | 📬 В очереди: {data['pending']} | 📤 Сегодня: {data['posted_today']}\n\n"
             )
             
-            if data['projects_list']:
-                msg_text += "<b>📁 Проекты:</b>\n"
-                for p in data['projects_list']:
-                    msg_text += (
-                        f"{p['status']} <b>{p['name']}</b>\n"
-                        f"   📥 {p['sources']} ист. | 📬 {p['pending']} в очереди | 📤 {p['posted_today']} сегодня | Последний пост: {p['last_post']} МСК\n"
-                    )
-                msg_text += "\n"
+            total_projects += data['projects']
+            total_sources += data['sources']
+            total_pending += data['pending']
+            total_posted += data['posted_today']
+        
+        msg_text += (
+            f"<b>Итого:</b> 📁 {total_projects} проектов | 📥 {total_sources} источников | 📬 {total_pending} в очереди | 📤 {total_posted} сегодня\n\n"
+        )
+        
+        msg_text += "Нажмите на клон ниже для подробной информации.\n"
     else:
         has_any = bool(registry.get_workers_for_type("tg2tg")) or bool(registry.get_workers_for_type("u2tg"))
         if has_any:
             msg_text = (
                 f"👋 <b>Добро пожаловать в KontentFabrik!</b>\n\n"
                 f"Я — единый центр управления парсерами.\n\n"
-                f"Нажмите кнопку ниже, чтобы открыть бота и создать привязку.\n"
-                f"Затем нажмите «Обновить» для просмотра статистики.\n\n"
+                f"Нажмите на клон ниже для подробностей.\n"
+                f"Ссылка в тексте откроет бота.\n\n"
                 f"/help — все команды"
             )
         else:
@@ -475,8 +566,5 @@ async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_text += f"\n<b>Ваши привязки:</b>\n"
     for b in registry.get_user_bindings(user_id):
         msg_text += f"  {b['bot_type']}#{b['clone_id']}\n"
-    
-    user_data = await registry.get_all_user_data(user_id)
-    msg_text += f"\n<b>Данные:</b> {list(user_data.keys())}"
     
     await update.message.reply_text(msg_text, parse_mode="HTML")

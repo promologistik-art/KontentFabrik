@@ -8,7 +8,8 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from config import Config
 from database import init_db
 from registry import registry
-from handlers import start, dashboard, refresh, debug, admin_panel, admin_users, admin_set_tariff, admin_tariffs_info, admin_clear_stuck, help_command, show_stats
+from scheduler import ReportScheduler
+from handlers import start, dashboard, refresh, debug, admin_panel, admin_users, admin_set_tariff, admin_tariffs_info, admin_clear_stuck, help_command, show_stats, show_clone_info
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -36,12 +37,17 @@ async def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("debug", debug))
+    app.add_handler(CallbackQueryHandler(show_clone_info, pattern="^clone_"))
     app.add_handler(CallbackQueryHandler(refresh, pattern="^refresh$"))
     app.add_handler(CallbackQueryHandler(admin_panel, pattern="^admin$"))
     app.add_handler(CallbackQueryHandler(admin_users, pattern="^admin_users$"))
     app.add_handler(CallbackQueryHandler(admin_tariffs_info, pattern="^admin_tariffs_info$"))
     app.add_handler(CallbackQueryHandler(admin_clear_stuck, pattern="^admin_clear_stuck$"))
     app.add_handler(CallbackQueryHandler(admin_set_tariff, pattern="^tariff_"))
+    
+    # Scheduler для ежедневного отчёта
+    report_scheduler = ReportScheduler()
+    report_task = asyncio.create_task(report_scheduler.start())
     
     await app.initialize()
     await app.start()
@@ -54,6 +60,8 @@ async def main():
     except asyncio.CancelledError:
         pass
     finally:
+        report_task.cancel()
+        await report_scheduler.stop()
         await app.updater.stop()
         await app.stop()
         await app.shutdown()
