@@ -562,6 +562,7 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    query = update.callback_query
     
     msg_text = (
         "📚 <b>KontentFabrik — Справка</b>\n\n"
@@ -588,7 +589,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"\n📢 <a href='https://t.me/+MAuGbcnBQmgxZTIy'>Больше ботов в канале</a>"
     )
     
-    await update.message.reply_text(msg_text, parse_mode="HTML", disable_web_page_preview=True)
+    if query:
+        await query.answer()
+        await query.edit_message_text(msg_text, parse_mode="HTML", disable_web_page_preview=True)
+    else:
+        await update.message.reply_text(msg_text, parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
