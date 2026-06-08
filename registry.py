@@ -38,7 +38,8 @@ class WorkerRegistry:
             result = await session.execute(select(UserBinding))
             self._bindings = {}
             for b in result.scalars().all():
-                self._bindings[str(b.head_user_id)] = {
+                key = f"{b.head_user_id}:{b.bot_type}"
+                self._bindings[key] = {
                     "head_user_id": b.head_user_id,
                     "worker_user_id": b.worker_user_id,
                     "bot_type": b.bot_type,
@@ -51,7 +52,9 @@ class WorkerRegistry:
     def get_workers_for_type(self, bot_type: str) -> list:
         return [w for w in self._workers.values() if w["bot_type"] == bot_type]
     
-    def get_user_binding(self, head_user_id: int) -> dict | None:
+    def get_user_binding(self, head_user_id: int, bot_type: str = None) -> dict | None:
+        if bot_type:
+            return self._bindings.get(f"{head_user_id}:{bot_type}")
         return self._bindings.get(str(head_user_id))
     
     def get_user_bindings(self, head_user_id: int, bot_type: str = None) -> list:
