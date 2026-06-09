@@ -50,7 +50,7 @@ class ReportScheduler:
             yesterday_str = yesterday.strftime('%d.%m.%Y')
             text = f"📊 <b>KontentFabrik — отчёт за {yesterday_str}</b>\n\n"
             
-            total_users = 0
+            unique_users = set()
             total_projects = 0
             total_sources = 0
             total_parsed = 0
@@ -58,10 +58,17 @@ class ReportScheduler:
             total_pending = 0
             total_failed = 0
             
+            from sqlalchemy import text as sql_text
+            
             for key, stats in all_stats.items():
                 prefix = stats.get('_prefix', '')
                 async with AsyncSessionLocal() as session:
-                    from sqlalchemy import text as sql_text
+                    # Уникальные пользователи
+                    r = await session.execute(
+                        sql_text(f"SELECT telegram_id FROM {prefix}users WHERE is_active = true")
+                    )
+                    for row in r.fetchall():
+                        unique_users.add(row[0])
                     
                     # Спарсено за вчера
                     r = await session.execute(
@@ -88,7 +95,6 @@ class ReportScheduler:
                     total_posted += posted
                     total_failed += failed
                 
-                total_users += stats.get('active_users', 0)
                 total_projects += stats.get('total_projects', 0)
                 total_sources += stats.get('total_sources', 0)
                 total_pending += stats.get('pending', 0)
@@ -102,7 +108,7 @@ class ReportScheduler:
             
             text += (
                 f"<b>Итого:</b>\n"
-                f"👥 Пользователей: {total_users}\n"
+                f"👥 Пользователей: {len(unique_users)}\n"
                 f"📁 Проектов: {total_projects}\n"
                 f"📥 Источников: {total_sources}\n"
                 f"🔄 Спарсено: {total_parsed}\n"
