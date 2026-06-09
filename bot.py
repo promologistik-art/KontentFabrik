@@ -3,13 +3,13 @@
 import asyncio
 import logging
 import sys
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 from config import Config
 from database import init_db
 from registry import registry
 from scheduler import ReportScheduler
-from handlers import start, dashboard, refresh, debug, admin_panel, admin_users, admin_set_tariff, admin_tariffs_info, admin_clear_stuck, help_command, show_stats, show_clone_info
+from handlers import start, dashboard, refresh, debug, admin_panel, admin_users, admin_set_tariff, admin_tariffs_info, admin_clear_stuck, admin_broadcast_start, admin_broadcast_send, help_command, show_stats, show_clone_info
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -44,7 +44,9 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_users, pattern="^admin_users$"))
     app.add_handler(CallbackQueryHandler(admin_tariffs_info, pattern="^admin_tariffs_info$"))
     app.add_handler(CallbackQueryHandler(admin_clear_stuck, pattern="^admin_clear_stuck$"))
+    app.add_handler(CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast$"))
     app.add_handler(CallbackQueryHandler(admin_set_tariff, pattern="^tariff_"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_send))
     
     report_scheduler = ReportScheduler()
     report_task = asyncio.create_task(report_scheduler.start())

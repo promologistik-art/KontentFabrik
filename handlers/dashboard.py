@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 import pytz
@@ -320,6 +321,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👥 Пользователи и тарифы", callback_data="admin_users")],
         [InlineKeyboardButton("ℹ️ Инфо о тарифах", callback_data="admin_tariffs_info")],
         [InlineKeyboardButton("🧹 Очистить зависшие посты", callback_data="admin_clear_stuck")],
+        [InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast")],
         [InlineKeyboardButton("◀️ Назад", callback_data="refresh")],
     ]
     
@@ -551,6 +553,69 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         
         await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+
+async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    user_id = update.effective_user.id
+    if user_id != Config.ADMIN_ID:
+        return
+    
+    context.user_data['awaiting_broadcast'] = True
+    await query.edit_message_text(
+        "📢 <b>Рассылка по всем пользователям</b>\n\n"
+        "Отправьте сообщение для рассылки.\n"
+        "/cancel — отмена",
+        parse_mode="HTML"
+    )
+
+
+async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get('awaiting_broadcast'):
+        return False
+    
+    user_id = update.effective_user.id
+    if user_id != Config.ADMIN_ID:
+        return False
+    
+    context.user_data.pop('awaiting_broadcast', None)
+    
+    all_users = set()
+    for key, worker in registry._workers.items():
+        prefix = worker["db_prefix"]
+        try:
+            async with AsyncSessionLocal() as session:
+                from sqlalchemy import text as sql_text
+                r = await session.execute(
+                    sql_text(f"SELECT telegram_id FROM {prefix}users WHERE is_active = true")
+                )
+                for row in r.fetchall():
+                    all_users.add(row[0])
+        except Exception as e:
+            logger.error(f"Failed to get users from {key}: {e}")
+    
+    sent = 0
+    failed = 0
+    
+    for uid in all_users:
+        try:
+            await update.message.copy(chat_id=uid)
+            sent += 1
+        except Exception as e:
+            logger.warning(f"Failed to send to {uid}: {e}")
+            failed += 1
+        await asyncio.sleep(0.5)
+    
+    await update.message.reply_text(
+        f"📢 <b>Рассылка завершена</b>\n\n"
+        f"✅ Отправлено: {sent}\n"
+        f"❌ Ошибок: {failed}",
+        parse_mode="HTML"
+    )
+    return True
 
 
 async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
