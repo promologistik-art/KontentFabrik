@@ -26,6 +26,29 @@ BOT_EMOJI = {
     "tg2vk": "📱"
 }
 
+TARIFF_LIMITS = {
+    "trial": (1, 3, 120, 60),
+    "basic": (1, 3, 120, 60),
+    "standard": (3, 5, 60, 30),
+    "pro": (10, 10, 30, 15),
+    "unlimited": (999, 999, 1, 5),
+    "god": (9999, 9999, 1, 1),
+}
+
+TARIFF_NAMES = {
+    "trial": "🎁 Trial (пробный, 5 дней)",
+    "basic": "💳 Basic (290 ₽/мес)",
+    "standard": "💎 Standard (590 ₽/мес)",
+    "pro": "👑 PRO (990 ₽/мес)",
+    "unlimited": "♾️ Unlimited",
+    "god": "🌟 God (без ограничений)"
+}
+
+TARIFF_EMOJI = {
+    "trial": "🎁", "basic": "💳", "standard": "💎",
+    "pro": "👑", "unlimited": "♾️", "god": "🌟"
+}
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -63,9 +86,9 @@ async def show_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📺 <b>YouTube → Telegram</b> — парсинг YouTube и постинг в Telegram\n"
         f"📱 <b>Telegram → VK</b> — парсинг Telegram и постинг в VK (скоро)\n\n"
         f"<b>🔹 Как начать:</b>\n"
-        f"1. Нажмите на кнопку парсера ниже — увидите статистику\n"
-        f"2. В статистике нажмите <b>«Открыть бота»</b> — перейдёте в парсер\n"
-        f"3. В парсере нажмите /start и следуйте инструкциям\n"
+        f"1. Нажмите на кнопку парсера ниже — статистика парсера будет обновлена\n"
+        f"2. Нажмите <b>«Открыть бота»</b> — перейдёте в парсер\n"
+        f"3. Там нажмите /start, следуйте инструкциям и создайте проекты\n"
         f"4. Вернитесь сюда и нажмите <b>«🔄 Обновить»</b>\n"
         f"5. Готово! Ваши проекты появятся в дашборде\n\n"
         f"{SUPPORT_TEXT}"
@@ -277,14 +300,17 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query:
-        await query.answer()
     
     user_id = update.effective_user.id
     if user_id != Config.ADMIN_ID:
         if query:
             await query.edit_message_text("❌ Доступ запрещён")
+        else:
+            await update.message.reply_text("❌ Доступ запрещён")
         return
+    
+    if query:
+        await query.answer()
     
     await registry.reload()
     all_stats = await registry.get_admin_stats()
@@ -399,7 +425,10 @@ async def admin_tariffs_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "   ⏰ Постинг от 30 мин | 🔍 Парсинг от 15 мин\n\n"
         "♾️ <b>Unlimited</b> — только для админа\n"
         "   📁 999 проектов | 📥 999 источников\n"
-        "   ⏰ Постинг от 1 мин | 🔍 Парсинг от 5 мин"
+        "   ⏰ Постинг от 1 мин | 🔍 Парсинг от 5 мин\n\n"
+        "🌟 <b>God</b> — без ограничений\n"
+        "   📁 9999 проектов | 📥 9999 источников\n"
+        "   ⏰ Постинг от 1 мин | 🔍 Парсинг от 1 мин"
     )
     
     keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="admin")]]
@@ -421,7 +450,7 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     result_text = (
         "👥 <b>Пользователи</b>\n"
-        "🎁Trial 💳Basic 💎Standard 👑PRO ♾️Unlimited\n\n"
+        "🎁Trial 💳Basic 💎Standard 👑PRO ♾️Unlimited 🌟God\n\n"
     )
     keyboard = []
     
@@ -438,14 +467,10 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 result_text += f"📡 <b>{worker['bot_username']}</b> — {label}:\n"
                 for u in users:
-                    tariff_emoji = {
-                        "trial": "🎁", "basic": "💳", "standard": "💎",
-                        "pro": "👑", "unlimited": "♾️"
-                    }.get(u[3], "❓")
-                    
+                    emoji = TARIFF_EMOJI.get(u[3], "❓")
                     name = u[1] or '—'
                     uname = u[2] or '—'
-                    result_text += f"  {tariff_emoji} {name} (@{uname}) [{u[3]}]\n"
+                    result_text += f"  {emoji} {name} (@{uname}) [{u[3]}]\n"
                     keyboard.append([
                         InlineKeyboardButton(
                             f"✏️ Сменить тариф: {name}",
@@ -480,14 +505,7 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
             worker_user_id = int(parts[1])
             tariff = parts[2]
             
-            limits = {
-                "trial": (1, 3, 120, 60),
-                "basic": (1, 3, 120, 60),
-                "standard": (3, 5, 60, 30),
-                "pro": (10, 10, 30, 15),
-                "unlimited": (999, 999, 1, 5),
-            }
-            mp, ms, pi, ci = limits.get(tariff, (1, 3, 120, 60))
+            mp, ms, pi, ci = TARIFF_LIMITS.get(tariff, (1, 3, 120, 60))
             
             for key, worker in registry._workers.items():
                 prefix = worker["db_prefix"]
@@ -502,20 +520,14 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error(f"Failed to update tariff in {key}: {e}")
             
-            tariff_names = {
-                "trial": "🎁 Trial (пробный, 5 дней)",
-                "basic": "💳 Basic (290 ₽/мес)",
-                "standard": "💎 Standard (590 ₽/мес)",
-                "pro": "👑 PRO (990 ₽/мес)",
-                "unlimited": "♾️ Unlimited"
-            }
+            tariff_name = TARIFF_NAMES.get(tariff, tariff)
             
             try:
                 await context.bot.send_message(
                     chat_id=worker_user_id,
                     text=(
                         f"🔔 <b>Ваш тариф изменён!</b>\n\n"
-                        f"Новый тариф: {tariff_names.get(tariff, tariff)}\n"
+                        f"Новый тариф: {tariff_name}\n"
                         f"📁 Проектов: {mp}\n"
                         f"📥 Источников на проект: {ms}\n"
                         f"⏰ Мин. интервал постинга: {pi} мин\n"
@@ -527,7 +539,7 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.warning(f"Failed to notify user {worker_user_id}: {e}")
             
-            await query.edit_message_text(f"✅ Тариф обновлён до «{tariff_names.get(tariff, tariff)}»")
+            await query.edit_message_text(f"✅ Тариф обновлён до «{tariff_name}»")
             return
     
     if data.startswith("tariff_"):
@@ -540,7 +552,8 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💳 <b>Basic</b> — 1 проект, 3 источника, 290₽/мес\n"
             f"💎 <b>Standard</b> — 3 проекта, 5 источников, 590₽/мес\n"
             f"👑 <b>PRO</b> — 10 проектов, 10 источников, 990₽/мес\n"
-            f"♾️ <b>Unlimited</b> — без ограничений"
+            f"♾️ <b>Unlimited</b> — без ограничений\n"
+            f"🌟 <b>God</b> — без ограничений (особый)"
         )
         
         keyboard = [
@@ -549,6 +562,7 @@ async def admin_set_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💎 Standard", callback_data=f"tariff_{worker_user_id}_standard")],
             [InlineKeyboardButton("👑 PRO", callback_data=f"tariff_{worker_user_id}_pro")],
             [InlineKeyboardButton("♾️ Unlimited", callback_data=f"tariff_{worker_user_id}_unlimited")],
+            [InlineKeyboardButton("🌟 God", callback_data=f"tariff_{worker_user_id}_god")],
             [InlineKeyboardButton("◀️ Назад", callback_data="admin_users")],
         ]
         
@@ -637,9 +651,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• YouTube → Telegram — парсинг YouTube и постинг в Telegram\n"
         "• Telegram → VK — Telegram → VK (скоро)\n\n"
         "<b>🔹 Как работать:</b>\n"
-        "1. Нажмите кнопку парсера — увидите статистику\n"
+        "1. Нажмите кнопку парсера — статистика парсера будет обновлена\n"
         "2. Нажмите <b>«Открыть бота»</b> — перейдёте в парсер\n"
-        "3. Там нажмите /start и создайте проекты\n"
+        "3. Там нажмите /start, следуйте инструкциям и создайте проекты\n"
         "4. Вернитесь сюда → «Обновить» → статистика готова\n\n"
         "<b>📋 Команды:</b>\n"
         "/start — дашборд\n"
